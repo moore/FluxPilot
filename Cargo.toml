@@ -3,6 +3,12 @@ name = "fluxpilot"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "fluxpilot"
+path = "src/main.rs"
+test = false
+doctest = false
+bench = false
 
 [dependencies]
 ch32-hal = {  git = "https://github.com/ch32-rs/ch32-hal.git", features = [
