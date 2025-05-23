@@ -71,7 +71,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "ch32-hal"
 version = "0.1.0"
-source = "git+https://github.com/ch32-rs/ch32-hal.git#2f176c867c6f1c152e6cec6954ebc2758b637fd1"
+source = "git+https://github.com/ch32-rs/ch32-hal.git?branch=usbd-example#0050d1a07b549565c8c9d37be3cbe1a821e9fa11"
 dependencies = [
  "ch32-metapac",
  "critical-section",
