@@ -31,12 +31,20 @@ use smart_leds::{brightness, SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
 use crate::ws2812::Ws2812;
 
-
-
+use core::sync::atomic::AtomicU8;
+use core::sync::atomic::Ordering;
 
 bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;
 });
+
+
+static MODE: AtomicU8 = AtomicU8::new(0);
+const MODE_CYCLE: u8 = 0;
+const MODE_RED: u8 = 1;
+const MODE_GREEN: u8 = 2;
+const MODE_BLUE: u8 = 3;
+
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -122,7 +130,24 @@ async fn main(_spawner: Spawner) {
         loop {
             for j in 0..(256 * 5) {
                 for i in 0..NUM_LEDS {
-                    data[i] = wheel((((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8);
+                    let mode = MODE.load(Ordering::Relaxed);
+                    match mode {
+                        MODE_CYCLE => {
+                            data[i] = wheel((((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8);
+                        }
+                        MODE_RED => {
+                            data[i] = (128,0,0).into();
+                        }
+                        MODE_GREEN => {
+                            data[i] = (0,128,0).into();
+                        }
+                        MODE_BLUE => {
+                            data[i] = (0,0,128).into();
+                        }
+                        _ => {
+                            data[i] = (128,0,128).into();
+                        }
+                    }
                 }
                 ws.write(brightness(data.iter().cloned(), 32)).unwrap();
                 Timer::after(Duration::from_millis(10)).await;
@@ -167,6 +192,16 @@ async fn echo<'d, T: Instance + 'd>(class: &mut CdcAcmClass<'d, Driver<'d, T>>) 
     loop {
         let n = class.read_packet(&mut buf).await?;
         let data = &buf[..n];
+        if data.len() > 0 {
+            let mode =  match data[0] {
+                b'c' => MODE_CYCLE,
+                b'r' => MODE_RED,
+                b'g' => MODE_GREEN,
+                b'b' => MODE_BLUE,
+                _ => MODE_RED,
+            };
+            MODE.store(mode, Ordering::Relaxed);
+        };
         class.write_packet(data).await?;
     }
 }
