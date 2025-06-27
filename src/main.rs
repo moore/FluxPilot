@@ -3,13 +3,9 @@
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 
-use qingke::riscv;
-
-
-use hal::gpio::{AnyPin, Level, Output, Pin};
 use hal::prelude::*;
 use hal::spi::Spi;
-use hal::{peripherals, println};
+use hal::peripherals;
 
 use embassy_executor::Spawner;
 use embassy_futures::join::join3;
@@ -18,11 +14,8 @@ use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
 use embassy_time::{Duration, Timer};
 
-use ch32_hal::usart;
 use ch32_hal::usbd::Driver;
 use ch32_hal::usbd::Instance;
-use ch32_hal::usbd::InterruptHandler;
-use ch32_hal::usb::EndpointDataBuffer;
 use ch32_hal::bind_interrupts;
 
 use {ch32_hal as hal, panic_halt as _};
@@ -33,6 +26,10 @@ use crate::ws2812::Ws2812;
 
 use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
+
+pub mod patch;
+pub mod track;
+pub mod sequance;
 
 bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;
@@ -59,15 +56,18 @@ async fn main(_spawner: Spawner) {
     let driver = Driver::new(usb, Irqs, p.PA12, p.PA11);
   
     // Create embassy-usb Config
-    let mut config = embassy_usb::Config::new(0xC0DE, 0xCAFE);
-    config.manufacturer = Some("Embassy");
-    config.product = Some("USB-serial example");
-    config.serial_number = Some("12345678");
+    let mut config = embassy_usb::Config::new(0x4348, 0x55e0);
+    config.manufacturer = Some("0xa9f4");
+    config.product = Some("FluxPilot");
+    config.serial_number = Some("314159");
     config.max_power = 100;
     config.max_packet_size_0 = 64;
 
     // Windows compatibility requires these; CDC-ACM
-    config.device_class = 0x02;
+    //config.device_class = 0x02;
+    // But we sue 0xff becouse we need it to not be bound
+    // by Android to work on mobil chome.
+    config.device_class = 0xFF;
     config.device_sub_class = 0x02;
     config.device_protocol = 0x00;
     config.composite_with_iads = false;
@@ -76,8 +76,6 @@ async fn main(_spawner: Spawner) {
     // It needs some buffers for building the descriptors.
     let mut config_descriptor = [0; 256];
     let mut bos_descriptor = [0; 256];
-    //let mut msos_descriptor = [0; 256];
-    let mut msos_descriptor = [0; 0];
     let mut control_buf = [0; 64];
 
     let mut state = State::new();
@@ -104,22 +102,20 @@ async fn main(_spawner: Spawner) {
     let echo_fut = async {
         loop {
             class.wait_connection().await;
-            //println!("Connected1");
             let _ = echo(&mut class).await;
-            //println!("Disconnected1");
         }
     };
 
     ////////////////////////////////////////////
 
     // SPI1
-    let MOSI = p.PA7;
+    let mosi = p.PA7;
 
     let mut spi_config = hal::spi::Config::default();
     spi_config.frequency = Hertz::mhz(3);
     spi_config.mode = ws2812::MODE;
 
-    let spi = Spi::new_blocking_txonly_nosck(p.SPI1, MOSI, spi_config);
+    let spi = Spi::new_blocking_txonly_nosck(p.SPI1, mosi, spi_config);
 
     let mut ws = Ws2812::new(spi);
 
@@ -202,6 +198,6 @@ async fn echo<'d, T: Instance + 'd>(class: &mut CdcAcmClass<'d, Driver<'d, T>>) 
             };
             MODE.store(mode, Ordering::Relaxed);
         };
-        class.write_packet(data).await?;
+        //class.write_packet(data).await?;
     }
 }
