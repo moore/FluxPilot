@@ -3,42 +3,39 @@
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 
+use hal::peripherals;
 use hal::prelude::*;
 use hal::spi::Spi;
-use hal::peripherals;
 
 use embassy_executor::Spawner;
 use embassy_futures::join::join3;
+use embassy_time::{Duration, Timer};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
-use embassy_time::{Duration, Timer};
 
+use ch32_hal::bind_interrupts;
 use ch32_hal::usbd::Driver;
 use ch32_hal::usbd::Instance;
-use ch32_hal::bind_interrupts;
 
 use {ch32_hal as hal, panic_halt as _};
 
+use crate::ws2812::Ws2812;
 use smart_leds::{brightness, SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
-use crate::ws2812::Ws2812;
 
 use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
 
-
 bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;
 });
-
 
 static MODE: AtomicU8 = AtomicU8::new(0);
 const MODE_CYCLE: u8 = 0;
 const MODE_RED: u8 = 1;
 const MODE_GREEN: u8 = 2;
 const MODE_BLUE: u8 = 3;
-
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -51,7 +48,7 @@ async fn main(_spawner: Spawner) {
 
     /* USB DRIVER SECION */
     let driver = Driver::new(usb, Irqs, p.PA12, p.PA11);
-  
+
     // Create embassy-usb Config
     let mut config = embassy_usb::Config::new(0x4348, 0x55e0);
     config.manufacturer = Some("0xa9f4");
@@ -126,25 +123,26 @@ async fn main(_spawner: Spawner) {
                     let mode = MODE.load(Ordering::Relaxed);
                     match mode {
                         MODE_CYCLE => {
-                            data[i] = wheel((((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8);
+                            data[i] = wheel(
+                                (((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8,
+                            );
                         }
                         MODE_RED => {
-                            data[i] = (128,0,0).into();
+                            data[i] = (128, 0, 0).into();
                         }
                         MODE_GREEN => {
-                            data[i] = (0,128,0).into();
+                            data[i] = (0, 128, 0).into();
                         }
                         MODE_BLUE => {
-                            data[i] = (0,0,128).into();
+                            data[i] = (0, 0, 128).into();
                         }
                         _ => {
-                            data[i] = (128,0,128).into();
+                            data[i] = (128, 0, 128).into();
                         }
                     }
                 }
                 ws.write(brightness(data.iter().cloned(), 32)).unwrap();
                 Timer::after(Duration::from_millis(10)).await;
-
             }
         }
     };
@@ -155,7 +153,7 @@ async fn main(_spawner: Spawner) {
 }
 
 /// Input a value 0 to 255 to get a color value
-/// The colours are a transition r - g - b - back to r. 
+/// The colours are a transition r - g - b - back to r.
 fn wheel(mut wheel_pos: u8) -> RGB8 {
     wheel_pos = 255 - wheel_pos;
     if wheel_pos < 85 {
@@ -180,13 +178,15 @@ impl From<EndpointError> for Disconnected {
     }
 }
 
-async fn echo<'d, T: Instance + 'd>(class: &mut CdcAcmClass<'d, Driver<'d, T>>) -> Result<(), Disconnected> {
+async fn echo<'d, T: Instance + 'd>(
+    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
+) -> Result<(), Disconnected> {
     let mut buf = [0; 64];
     loop {
         let n = class.read_packet(&mut buf).await?;
         let data = &buf[..n];
         if data.len() > 0 {
-            let mode =  match data[0] {
+            let mode = match data[0] {
                 b'c' => MODE_CYCLE,
                 b'r' => MODE_RED,
                 b'g' => MODE_GREEN,

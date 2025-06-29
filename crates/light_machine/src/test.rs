@@ -32,9 +32,9 @@ fn get_test_program() -> MachineData {
     program[12] = 2;
     program[13] = Ops::Return.into();
 
-    MachineData { 
+    MachineData {
         globals,
-        static_data, 
+        static_data,
         program,
         main: 0,
         init: 7,
@@ -42,15 +42,15 @@ fn get_test_program() -> MachineData {
 }
 
 #[test]
-fn test_init_get_color() -> Result<(), MachineError>{
+fn test_init_get_color() -> Result<(), MachineError> {
     let mut md = get_test_program();
 
     let mut machine = Machine::new(
-        &md.static_data, 
-        &mut md.globals, 
-        &md.program, 
-        md.init, 
-        md.main
+        &md.static_data,
+        &mut md.globals,
+        &md.program,
+        md.init,
+        md.main,
     )?;
 
     let (red, green, blue) = (17, 23, 31);
@@ -61,8 +61,12 @@ fn test_init_get_color() -> Result<(), MachineError>{
     machine.init(&mut stack)?;
 
     assert_eq!(stack.len(), 0);
-    let (r, g, b) = machine.get_led_color(31337, &mut stack).expect("Could not get led color");
-    assert_eq!(stack.len(), 1);
+
+    let (r, g, b) = machine
+        .get_led_color(31337, &mut stack)
+        .expect("Could not get led color");
+
+    assert_eq!(stack.len(), 1); // 1 becouse we leave the led index on the stack in our test
     assert_eq!(stack[0], 31337);
     assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
     Ok(())
