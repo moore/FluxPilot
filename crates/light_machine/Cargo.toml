@@ -1,0 +1,9 @@
+[package]
+name = "light_machine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+variant_count = "1.2.0"
+heapless = { workspace = true }
+thiserror-no-std = {workspace = true}

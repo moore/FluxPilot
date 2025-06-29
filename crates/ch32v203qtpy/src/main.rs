@@ -27,9 +27,6 @@ use crate::ws2812::Ws2812;
 use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
 
-pub mod patch;
-pub mod track;
-pub mod sequance;
 
 bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;

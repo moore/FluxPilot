@@ -451,6 +451,7 @@ dependencies = [
  "qingke-rt",
  "smart-leds",
  "ssd1306",
+ "thiserror-no-std",
  "ws2812-spi",
 ]
 
@@ -566,6 +567,15 @@ name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
+
+[[package]]
+name = "light_machine"
+version = "0.1.0"
+dependencies = [
+ "heapless",
+ "thiserror-no-std",
+ "variant_count",
+]
 
 [[package]]
 name = "litrs"
@@ -880,6 +890,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "thiserror-impl-no-std"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58e6318948b519ba6dc2b442a6d0b904ebfb8d411a3ad3e07843615a72249758"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "thiserror-no-std"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3ad459d94dd517257cc96add8a43190ee620011bb6e6cdc82dafd97dfafafea"
+dependencies = [
+ "thiserror-impl-no-std",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -936,6 +966,17 @@ dependencies = [
  "serde",
  "syn 1.0.109",
  "usbd-hid-descriptors",
+]
+
+[[package]]
+name = "variant_count"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1935e10c6f04d22688d07c0790f2fc0e1b1c5c2c55bc0cc87ed67656e587dd8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
 ]
 
 [[package]]
