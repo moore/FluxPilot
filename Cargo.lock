@@ -445,6 +445,7 @@ dependencies = [
  "embedded-graphics",
  "embedded-hal 1.0.0",
  "heapless",
+ "light_machine",
  "micromath",
  "panic-halt",
  "qingke",
@@ -572,6 +573,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 name = "light_machine"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "heapless",
  "thiserror-no-std",
  "variant_count",

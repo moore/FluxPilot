@@ -5,6 +5,7 @@ use heapless::Vec;
 use thiserror_no_std::Error;
 use variant_count::VariantCount;
 
+mod builder;
 /// This module implments the vitural machine for FluxPilot.
 /// A machine takes three memory regions when it is initilized:
 /// `

@@ -44,8 +44,9 @@ heapless = "0.8.0"
 micromath = { version = "2.1.0", features = ["num-traits"] }
 smart-leds = "0.4.0"
 ws2812-spi = "0.5.0"
-bincode = { version = "2.0.1", default-features = false, features = ["derive"]}
+bincode = { workspace = true}
 thiserror-no-std = {workspace = true}
+light_machine = {path = "../light_machine"}
 
 # mipidsi = "0.7.1"
 # embedded-hal-bus = "0.1.0"

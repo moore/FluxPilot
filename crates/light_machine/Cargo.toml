@@ -7,3 +7,4 @@ edition = "2024"
 variant_count = "1.2.0"
 heapless = { workspace = true }
 thiserror-no-std = {workspace = true}
+bincode = { workspace = true}

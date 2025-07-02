@@ -5,6 +5,8 @@ members = ["crates/*"]
 [workspace.dependencies]
 heapless = { version = "0.8.0", default-features = false }
 thiserror-no-std = "2.0.2"
+bincode = { version = "2.0.1", default-features = false, features = ["derive"]}
+
 
 [profile.release]
 strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
