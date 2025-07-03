@@ -46,11 +46,12 @@ impl<'a> ProgramBuilder<'a> {
     pub fn new_machine(
         self,
         function_count: Word,
+        globals_size: Word,
     ) -> Result<MachineBuilder<'a>, MachineBuilderError> {
         self.buffer[0] = self.next_builder;
         // SAFTY: checked in `new`
         self.buffer[self.next_builder as usize] = self.free as Word;
-        MachineBuilder::new(self, function_count)
+        MachineBuilder::new(self, function_count, globals_size)
     }
 
     fn allocate(&mut self, word_count: Word) -> Result<(), MachineBuilderError> {
@@ -89,7 +90,9 @@ impl<'a> MachineBuilder<'a> {
     pub fn new(
         mut program: ProgramBuilder<'a>,
         function_count: Word,
+        globals_size: Word,
     ) -> Result<Self, MachineBuilderError> {
+        program.add_word(globals_size)?;
         let next_function = program.free;
         program.allocate(function_count)?;
         let function_end = program.free;

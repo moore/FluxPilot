@@ -16,24 +16,26 @@ fn test_new_machine_builder() -> Result<(), MachineBuilderError> {
     let machine_count = 3;
     let function_count = 5;
     #[rustfmt::skip]
-    let goal: [u16; 20] = [
-        2,              // machine count ( one allocated but not used)
-        4, 12, 0,       // machine pointers (last unused)
+    let goal= [
+        2u16,              // machine count ( one allocated but not used)
+        4, 13, 0,       // machine pointers (last unused)
+        0,              // globals size
         0, 0, 0, 0, 0,  // Machine 1 function table (no functions)
         17, 31, 71,     // Machine 1 static data
+        0,              // Globals size
         0, 0, 0, 0, 0,  // Machine 2 fucntion table (no functions)
         7, 11, 97,      // Manchie 2 static data
     ];
 
-    let mut buffer = [0u16; 20];
+    let mut buffer = [0u16; 22];
     let program = ProgramBuilder::new(&mut buffer, machine_count)?;
 
-    let mut machine = program.new_machine(function_count)?;
+    let mut machine = program.new_machine(function_count, 0)?;
     let data = [17, 31, 71];
     let index = machine.add_static(data.as_slice())?;
     let program = machine.finish();
 
-    let mut machine = program.new_machine(function_count)?;
+    let mut machine = program.new_machine(function_count, 0)?;
     let data = [7, 11, 97];
     let index = machine.add_static(data.as_slice())?;
     let program = machine.finish();
@@ -47,12 +49,15 @@ fn test_new_machine_builder() -> Result<(), MachineBuilderError> {
 fn test_new_function_builder() -> Result<(), MachineBuilderError> {
     let machine_count = 1;
     let function_count = 1;
+    let globals_size = 2;
+
     #[rustfmt::skip]
     let goal = [
-        1u16,       // machine count
-        2,          // machine pointers
-        6,          // Machine 1 function table (no functions)
-        17, 31, 71, // Machine 1 static data
+        1u16,            // machine count
+        2,               // machine pointer
+        2,               // Globals size
+        7,               // Machine 1 function table
+        17, 31, 71,      // Machine 1 static data
         Ops::Push.into(),
         11,
         Ops::Load.into(),
@@ -62,10 +67,10 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
         Ops::Return.into(),
     ];
 
-    let mut buffer = [0u16; 13];
+    let mut buffer = [0u16; 14];
     let program = ProgramBuilder::new(&mut buffer, machine_count)?;
 
-    let mut machine = program.new_machine(function_count)?;
+    let mut machine = program.new_machine(function_count, globals_size)?;
     let data = [17, 31, 71];
     let index = machine.add_static(data.as_slice())?;
     let mut function = machine.new_function()?;
