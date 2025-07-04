@@ -5,7 +5,7 @@ use heapless::Vec;
 use thiserror_no_std::Error;
 use variant_count::VariantCount;
 
-mod builder;
+pub mod builder;
 /// This module implments the vitural machine for FluxPilot.
 /// A machine takes three memory regions when it is initilized:
 /// `
@@ -35,7 +35,7 @@ mod builder;
 type Word = u16;
 
 #[repr(u16)] // Must match Word
-#[derive(VariantCount)]
+#[derive(VariantCount, Debug)]
 pub enum Ops {
     Pop,
     Push,
@@ -86,8 +86,8 @@ impl TryFrom<Word> for Ops {
 
 #[derive(Error, Debug)]
 pub enum MachineError {
-    #[error("the value {0} is out of the program bounds")]
-    InstructionPointerOutOfBounds(usize),
+    //#[error("the value {0} is out of the program bounds")]
+    //InstructionPointerOutOfBounds(usize),
     #[error("the value {0} is out of the globals bounds")]
     OutOfBoundsGlobalsAccess(usize),
     #[error("the value {0} is an invalid opcode")]
@@ -100,57 +100,88 @@ pub enum MachineError {
     StackUnderFlow,
     #[error("word {0} out of range of color value")]
     ColorOutOfRange(Word),
+    #[error("indesx {0} out of range of static data")]
+    OutOfBoudsStaticRead(usize),
+    #[error("index {0} out of range of static data")]
+    GlobalsBufferTooSmall(Word),
+    #[error("index {0} out of range for machine index")]
+    MachineIndexOutOfRange(Word),
 }
 
-pub struct Machine<'a, 'b, 'c> {
+const MACHINE_COUNT_OFFSET: usize = 0;
+const GLOBALS_SIZE_OFFSET: usize = 1;
+const FIRST_MACHINE_OFFSET: usize = 2;
+const INIT_OFFSET: usize = FIRST_MACHINE_OFFSET;
+const GET_COLOR_OFFSET: usize = INIT_OFFSET + 1;
+
+pub struct Program<'a, 'b> {
     static_data: &'a [Word],
     globals: &'b mut [Word],
-    program: &'c [Word],
-    // Replace thise with a jump table at the start of Self.program
-    init: usize, // Offset in to program
-    main: usize, // Offset in to program
 }
 
-impl<'a, 'b, 'c> Machine<'a, 'b, 'c> {
-    pub fn new(
-        static_data: &'a [Word],
-        globals: &'b mut [Word],
-        program: &'c [Word],
-        init: usize,
-        main: usize,
-    ) -> Result<Self, MachineError> {
-        if init >= program.len() {
-            return Err(MachineError::InstructionPointerOutOfBounds(init));
-        }
+impl<'a, 'b> Program<'a, 'b> {
+    pub fn new(static_data: &'a [Word], globals: &'b mut [Word]) -> Result<Self, MachineError> {
 
-        if main >= program.len() {
-            return Err(MachineError::InstructionPointerOutOfBounds(main));
+        let Some(globals_size) = static_data.get(GLOBALS_SIZE_OFFSET) else {
+            return Err(MachineError::OutOfBoudsStaticRead(GLOBALS_SIZE_OFFSET));
+        };
+
+        if *globals_size as usize > globals.len() {
+            return Err(MachineError::GlobalsBufferTooSmall(*globals_size));
         }
 
         Ok(Self {
             static_data,
             globals,
-            program,
-            init,
-            main,
         })
     }
 
-    pub fn init<const STACK_SIZE: usize>(
+    pub fn machine_count(&mut self) -> Result<Word, MachineError> {
+        let Some(count) = self.static_data.get(MACHINE_COUNT_OFFSET) else {
+            return Err(MachineError::OutOfBoudsStaticRead(MACHINE_COUNT_OFFSET));
+        };
+
+        Ok(*count)
+    }
+
+    fn get_function_entry(
+        &self,
+        machine_number: Word,
+        function_number: usize
+    ) -> Result<usize, MachineError> {
+        let machine_slot = machine_number as usize;
+        let machine_index = read_static(machine_slot, self.static_data)?;
+        let index_function_index = (machine_index + 2) as usize + function_number;
+        let entry_point = read_static(index_function_index, self.static_data)?;
+
+        Ok(entry_point as usize)
+    }
+
+    pub fn init_machine<const STACK_SIZE: usize>(
         &mut self,
+        machine_number: Word,
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(), MachineError> {
-        self.run(self.init, stack)
+        if machine_number > self.machine_count()? {
+            return Err(MachineError::MachineIndexOutOfRange(machine_number));
+        };
+    
+        let entry_point = self.get_function_entry(machine_number, INIT_OFFSET)?;
+        self.run(entry_point, stack)?;
+        Ok(())
     }
 
     pub fn get_led_color<const STACK_SIZE: usize>(
         &mut self,
+        machine_number: Word,
         index: u16,
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(u8, u8, u8), MachineError> {
         stack.push(index).map_err(|_| MachineError::StackOverflow)?;
 
-        self.run(self.main, stack)?;
+        let entry_point = self.get_function_entry(machine_number, GET_COLOR_OFFSET)?;
+
+        self.run(entry_point, stack)?;
 
         let Some(red) = stack.pop() else {
             return Err(MachineError::StackUnderFlow);
@@ -170,7 +201,7 @@ impl<'a, 'b, 'c> Machine<'a, 'b, 'c> {
 
         Ok((red, green, blue))
     }
-
+    
     fn run<const STACK_SIZE: usize>(
         &mut self,
         entry_point: usize,
@@ -179,10 +210,9 @@ impl<'a, 'b, 'c> Machine<'a, 'b, 'c> {
         let mut pc = entry_point;
 
         loop {
-            let word = read_instruction(pc, self.program)?;
-            let foo = Ops::Add;
-
-            match word.try_into()? {
+            let word = read_static(pc, self.static_data)?;
+            let op = word.try_into()?;
+            match op {
                 Ops::Pop => {
                     if stack.pop().is_none() {
                         return Err(MachineError::PopOnEmptyStack);
@@ -190,7 +220,7 @@ impl<'a, 'b, 'c> Machine<'a, 'b, 'c> {
                 }
                 Ops::Push => {
                     pc += 1;
-                    let word = read_instruction(pc, self.program)?;
+                    let word = read_static(pc, self.static_data)?;
                     if let Err(_) = stack.push(word) {
                         return Err(MachineError::StackOverflow);
                     }
@@ -214,7 +244,7 @@ impl<'a, 'b, 'c> Machine<'a, 'b, 'c> {
                 Ops::Subtract => (),
                 Ops::Load => {
                     pc += 1;
-                    let word = read_instruction(pc, self.program)?;
+                    let word = read_static(pc, self.static_data)?;
 
                     const {
                         assert!(size_of::<Word>() <= size_of::<usize>());
@@ -230,7 +260,7 @@ impl<'a, 'b, 'c> Machine<'a, 'b, 'c> {
                 }
                 Ops::Store => {
                     pc += 1;
-                    let word = read_instruction(pc, self.program)?;
+                    let word = read_static(pc, self.static_data)?;
 
                     const {
                         assert!(size_of::<Word>() <= size_of::<usize>());
@@ -259,9 +289,10 @@ impl<'a, 'b, 'c> Machine<'a, 'b, 'c> {
     }
 }
 
-fn read_instruction(pc: usize, program: &[Word]) -> Result<Word, MachineError> {
-    match program.get(pc) {
-        None => Err(MachineError::InstructionPointerOutOfBounds(pc)),
+
+fn read_static(index: usize, program: &[Word]) -> Result<Word, MachineError> {
+    match program.get(index) {
+        None => Err(MachineError::OutOfBoudsStaticRead(index)),
         Some(word) => Ok(*word),
     }
 }
