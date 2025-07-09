@@ -32,7 +32,7 @@ pub mod builder;
 /// and program data in the program section and allows the
 /// stack to have a single type.
 
-type Word = u16;
+pub type Word = u16;
 
 #[repr(u16)] // Must match Word
 #[derive(VariantCount, Debug)]

@@ -47,6 +47,7 @@ ws2812-spi = "0.5.0"
 bincode = { workspace = true}
 thiserror-no-std = {workspace = true}
 light_machine = {path = "../light_machine"}
+embassy-sync = "0.7.0"
 
 # mipidsi = "0.7.1"
 # embedded-hal-bus = "0.1.0"

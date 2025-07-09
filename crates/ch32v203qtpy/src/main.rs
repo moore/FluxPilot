@@ -13,6 +13,9 @@ use embassy_time::{Duration, Timer};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
+use embassy_sync::channel::{Channel, Sender};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+
 
 use ch32_hal::bind_interrupts;
 use ch32_hal::usbd::Driver;
@@ -26,8 +29,18 @@ use ws2812_spi as ws2812;
 
 use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
+use light_machine::{
+    builder::{
+        MachineBuilderError,
+        ProgramBuilder,
+        Op,
+    },
+    MachineError, 
+    Program,
+    Word,
+};
 
-use light_machine;
+use heapless::Vec;
 
 bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;
@@ -38,6 +51,9 @@ const MODE_CYCLE: u8 = 0;
 const MODE_RED: u8 = 1;
 const MODE_GREEN: u8 = 2;
 const MODE_BLUE: u8 = 3;
+
+
+static CHANNEL: Channel::<CriticalSectionRawMutex, u8, 1> = Channel::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -94,11 +110,23 @@ async fn main(_spawner: Spawner) {
     // Run the USB device.
     let usb_fut = usb.run();
 
+    /////////////////////////////////////////////////
+
+
+    let mut buffer = [0u16; 100];
+    get_program(&mut buffer).expect("could not get program");
+    let mut globals = [0u16; 10];
+    let mut stack: Vec<Word, 100> = Vec::new();
+    let mut program = Program::new(buffer.as_slice(), globals.as_mut_slice()).expect("clould not init program");
+
+    let sender = CHANNEL.sender();
+
+
     // Do stuff with the class!
     let echo_fut = async {
         loop {
             class.wait_connection().await;
-            let _ = echo(&mut class).await;
+            let _ = echo(&mut class, sender).await;
         }
     };
 
@@ -119,27 +147,57 @@ async fn main(_spawner: Spawner) {
     let mut data = [RGB8::default(); NUM_LEDS];
 
     let led_loop = async {
+        let mut mode = b'c';
         loop {
             for j in 0..(256 * 5) {
                 for i in 0..NUM_LEDS {
-                    let mode = MODE.load(Ordering::Relaxed);
+                    if let Ok(read_mode) = CHANNEL.try_receive() {
+                        mode = read_mode;
+                        match mode {
+                            b'r' => {
+                                stack.push(128).unwrap();
+                                stack.push(0).unwrap();
+                                stack.push(0).unwrap();
+
+                                program.init_machine(0, &mut stack).unwrap();
+                            }
+                            b'g' => {//MODE_GREEN => {
+                                stack.push(0).unwrap();
+                                stack.push(128).unwrap();
+                                stack.push(0).unwrap();
+
+                                program.init_machine(0, &mut stack).unwrap();
+                            }
+                            b'b' => {//MODE_BLUE => {
+                                stack.push(0).unwrap();
+                                stack.push(0).unwrap();
+                                stack.push(128).unwrap();
+
+                                program.init_machine(0, &mut stack).unwrap();
+                            }
+                            _ => {
+                                stack.push(128).unwrap();
+                                stack.push(0).unwrap();
+                                stack.push(0).unwrap();
+
+                                program.init_machine(0, &mut stack).unwrap();
+                            }
+                        }
+                    }
+                    //let mode = MODE.load(Ordering::Relaxed);
                     match mode {
-                        MODE_CYCLE => {
+                        b'c' => { //MODE_CYCLE => {
                             data[i] = wheel(
                                 (((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8,
                             );
                         }
-                        MODE_RED => {
-                            data[i] = (128, 0, 0).into();
-                        }
-                        MODE_GREEN => {
-                            data[i] = (0, 128, 0).into();
-                        }
-                        MODE_BLUE => {
-                            data[i] = (0, 0, 128).into();
-                        }
                         _ => {
-                            data[i] = (128, 0, 128).into();
+                            if let Ok((red, green, blue)) = program.get_led_color(0, i as u16, &mut stack) {
+                                data[i] = (red, green, blue).into();
+                                stack.clear();
+                            } else {
+                                // ???
+                            }
                         }
                     }
                 }
@@ -152,6 +210,34 @@ async fn main(_spawner: Spawner) {
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
     join3(usb_fut, echo_fut, led_loop).await;
+}
+
+
+fn get_program(buffer: &mut [u16])-> Result<(), MachineBuilderError>{
+    let machine_count = 1;
+    let program_builder = ProgramBuilder::new(buffer, machine_count)?;
+
+    let function_count = 2;
+    let globals_size = 3;
+    let machine = program_builder.new_machine(function_count, globals_size)?;
+    let mut function = machine.new_function()?;
+    function.add_op(Op::Store(0))?;
+    function.add_op(Op::Store(1))?;
+    function.add_op(Op::Store(2))?;
+    function.add_op(Op::Return)?;
+    let (_function_index, machine) = function.finish();
+
+    let mut function = machine.new_function()
+        .expect("could not get fucntion builder");
+    function.add_op(Op::Load(0))?;
+    function.add_op(Op::Load(1))?;
+    function.add_op(Op::Load(2))?;
+    function.add_op(Op::Return)?;
+    let (_function_index,machine) = function.finish();
+
+    let _program_builder = machine.finish();
+
+    Ok(())
 }
 
 /// Input a value 0 to 255 to get a color value
@@ -182,12 +268,15 @@ impl From<EndpointError> for Disconnected {
 
 async fn echo<'d, T: Instance + 'd>(
     class: &mut CdcAcmClass<'d, Driver<'d, T>>,
+    tx: Sender<'static, CriticalSectionRawMutex, u8, 1>
 ) -> Result<(), Disconnected> {
     let mut buf = [0; 64];
     loop {
         let n = class.read_packet(&mut buf).await?;
         let data = &buf[..n];
         if data.len() > 0 {
+            // we don't care if were full just drop it
+            let _ = tx.try_send(data[0]);  
             let mode = match data[0] {
                 b'c' => MODE_CYCLE,
                 b'r' => MODE_RED,
@@ -201,46 +290,3 @@ async fn echo<'d, T: Instance + 'd>(
     }
 }
 
-
-////// Temp Code ///////
-
-struct MachineData {
-    globals: [Word; 10],
-    static_data: [Word; 0],
-    program: [Word; 100],
-    main: usize,
-    init: usize,
-}
-
-fn get_test_program() -> MachineData {
-    let globals = [0u16; 10];
-    let static_data = [0u16; 0];
-    let mut program = [0u16; 100];
-
-    // main
-    // globals, 0, 1, 2, on to stack
-    program[0] = Ops::Load.into();
-    program[1] = 0;
-    program[2] = Ops::Load.into();
-    program[3] = 1;
-    program[4] = Ops::Load.into();
-    program[5] = 2;
-    program[6] = Ops::Return.into();
-
-    // init stor the top three entires in to globals 0, 1, 2
-    program[7] = Ops::Store.into();
-    program[8] = 0;
-    program[9] = Ops::Store.into();
-    program[10] = 1;
-    program[11] = Ops::Store.into();
-    program[12] = 2;
-    program[13] = Ops::Return.into();
-
-    MachineData {
-        globals,
-        static_data,
-        program,
-        main: 0,
-        init: 7,
-    }
-}
