@@ -11,7 +11,8 @@ doctest = false
 bench = false
 
 [dependencies]
-ch32-hal = {  git = "https://github.com/ch32-rs/ch32-hal.git", branch = "usbd-example", features = [
+#ch32-hal = {  git = "https://github.com/ch32-rs/ch32-hal.git", branch = "usbd-example", features = [
+ch32-hal = {  git = "https://github.com/moore/ch32-hal.git", features = [
     "ch32v203g8r6",
     "memory-x",
     "embassy",
@@ -19,20 +20,28 @@ ch32-hal = {  git = "https://github.com/ch32-rs/ch32-hal.git", branch = "usbd-ex
     "time-driver-tim2",
 ], default-features = false }
 
-embassy-executor = { version = "0.6.0", features = [
-    "integrated-timers",
+embassy-executor = { version = "0.7.0", features = [
+    #"integrated-timers",
     #"arch-riscv32",
     "arch-spin", # TODO: Required for USBD to connect properly
     "executor-thread",
 ] }
 
-embassy-time = { version = "0.3.2" }
-embassy-usb = { version = "0.3.0" }
+embassy-time = { version = "0.4.0" }
+embassy-usb = { version = "0.5.1" }
 embassy-futures = { version = "0.1.0" }
 
 # This is okay because we should automatically use whatever ch32-hal uses
 qingke-rt = "*"
 qingke = "*"
+
+# Critical-section implementation for single-hart RISC-V
+riscv            = { version = "0.15", features = ["critical-section-single-hart"] }
+critical-section = "1.2"
+
+# Software-emulated atomics
+portable-atomic  = { version = "1.11.1", features = ["critical-section"] }
+
 
 panic-halt = "1.0"
 
@@ -40,7 +49,7 @@ display-interface-spi = "0.5.0"
 embedded-hal = "1.0.0"
 embedded-graphics = "0.8.1"
 ssd1306 = "0.8.4"
-heapless = "0.8.0"
+heapless  = { workspace = true}
 micromath = { version = "2.1.0", features = ["num-traits"] }
 smart-leds = "0.4.0"
 ws2812-spi = "0.5.0"

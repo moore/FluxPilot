@@ -1,14 +1,24 @@
 [workspace]
+members = [
+    "crates/*",
+]
 resolver = "3"
-members = ["crates/*"]
 
 [workspace.dependencies]
-heapless = { version = "0.8.0", default-features = false }
 thiserror-no-std = "2.0.2"
-bincode = { version = "2.0.1", default-features = false, features = ["derive"]}
+
+[workspace.dependencies.bincode]
+version = "2.0.1"
+features = ["derive"]
+default-features = false
+
+[workspace.dependencies.heapless]
+version = "0.9.0"
+default-features = false
+features = ["portable-atomic-critical-section"]
 
 
 [profile.release]
-strip = false   # symbols are not flashed to the microcontroller, so don't strip them.
+opt-level = "s"
 lto = true
-opt-level = "s" # Optimize for size.
+strip = false

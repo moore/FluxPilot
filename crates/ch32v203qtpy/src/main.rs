@@ -46,7 +46,6 @@ bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;
 });
 
-static MODE: AtomicU8 = AtomicU8::new(0);
 const MODE_CYCLE: u8 = 0;
 const MODE_RED: u8 = 1;
 const MODE_GREEN: u8 = 2;
@@ -69,18 +68,21 @@ async fn main(_spawner: Spawner) {
 
     // Create embassy-usb Config
     let mut config = embassy_usb::Config::new(0x4348, 0x55e0);
+    //let mut config = embassy_usb::Config::new(0x303A, 0x3001);
+
+    //let mut config = embassy_usb::Config::new(0xC0DE, 0xCAFE);
+
     config.manufacturer = Some("0xa9f4");
     config.product = Some("FluxPilot");
     config.serial_number = Some("314159");
-    config.max_power = 100;
-    config.max_packet_size_0 = 64;
+
 
     // Windows compatibility requires these; CDC-ACM
     //config.device_class = 0x02;
     // But we sue 0xff becouse we need it to not be bound
     // by Android to work on mobil chome.
     config.device_class = 0xFF;
-    config.device_sub_class = 0x02;
+    config.device_sub_class = 0x00;
     config.device_protocol = 0x00;
     config.composite_with_iads = false;
 
@@ -131,7 +133,7 @@ async fn main(_spawner: Spawner) {
     };
 
     ////////////////////////////////////////////
-
+    
     // SPI1
     let mosi = p.PA7;
 
@@ -151,6 +153,7 @@ async fn main(_spawner: Spawner) {
         loop {
             for j in 0..(256 * 5) {
                 for i in 0..NUM_LEDS {
+                    
                     if let Ok(read_mode) = CHANNEL.try_receive() {
                         mode = read_mode;
                         match mode {
@@ -201,8 +204,8 @@ async fn main(_spawner: Spawner) {
                         }
                     }
                 }
-                ws.write(brightness(data.iter().cloned(), 32)).unwrap();
-                Timer::after(Duration::from_millis(10)).await;
+                ws.write(brightness(data.iter().cloned(), 2)).unwrap();
+                Timer::after_millis(10).await;
             }
         }
     };
@@ -284,7 +287,6 @@ async fn echo<'d, T: Instance + 'd>(
                 b'b' => MODE_BLUE,
                 _ => MODE_RED,
             };
-            MODE.store(mode, Ordering::Relaxed);
         };
         //class.write_packet(data).await?;
     }
