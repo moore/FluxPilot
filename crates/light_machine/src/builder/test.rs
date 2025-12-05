@@ -47,7 +47,6 @@ fn test_new_machine_builder() -> Result<(), MachineBuilderError> {
     Ok(())
 }
 
-
 #[test]
 fn test_new_function_builder() -> Result<(), MachineBuilderError> {
     let machine_count = 1;
@@ -96,7 +95,6 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
     let (fn_index, machine) = function.finish();
 
     let program: ProgramBuilder<'_> = machine.finish();
-
 
     assert_eq!(buffer, goal);
     Ok(())

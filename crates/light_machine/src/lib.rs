@@ -121,7 +121,6 @@ pub struct Program<'a, 'b> {
 
 impl<'a, 'b> Program<'a, 'b> {
     pub fn new(static_data: &'a [Word], globals: &'b mut [Word]) -> Result<Self, MachineError> {
-
         let Some(globals_size) = static_data.get(GLOBALS_SIZE_OFFSET) else {
             return Err(MachineError::OutOfBoudsStaticRead(GLOBALS_SIZE_OFFSET));
         };
@@ -136,7 +135,7 @@ impl<'a, 'b> Program<'a, 'b> {
         })
     }
 
-    pub fn machine_count(&mut self) -> Result<Word, MachineError> {
+    pub fn machine_count(&self) -> Result<Word, MachineError> {
         let Some(count) = self.static_data.get(MACHINE_COUNT_OFFSET) else {
             return Err(MachineError::OutOfBoudsStaticRead(MACHINE_COUNT_OFFSET));
         };
@@ -147,8 +146,12 @@ impl<'a, 'b> Program<'a, 'b> {
     fn get_function_entry(
         &self,
         machine_number: Word,
-        function_number: usize
+        function_number: usize,
     ) -> Result<usize, MachineError> {
+        if machine_number > self.machine_count()? {
+            return Err(MachineError::MachineIndexOutOfRange(machine_number));
+        };
+        // BOOG check for function out of range.
         let machine_slot = machine_number as usize;
         let machine_index = read_static(machine_slot, self.static_data)?;
         let index_function_index = (machine_index + 2) as usize + function_number;
@@ -162,10 +165,6 @@ impl<'a, 'b> Program<'a, 'b> {
         machine_number: Word,
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(), MachineError> {
-        if machine_number > self.machine_count()? {
-            return Err(MachineError::MachineIndexOutOfRange(machine_number));
-        };
-    
         let entry_point = self.get_function_entry(machine_number, INIT_OFFSET)?;
         self.run(entry_point, stack)?;
         Ok(())
@@ -201,7 +200,18 @@ impl<'a, 'b> Program<'a, 'b> {
 
         Ok((red, green, blue))
     }
-    
+
+    pub fn call<const STACK_SIZE: usize>(
+        &mut self,
+        machine_number: Word,
+        function_number: usize,
+        stack: &mut Vec<Word, STACK_SIZE>,
+    ) -> Result<(), MachineError> {
+        let entry_point = self.get_function_entry(machine_number, function_number)?;
+        self.run(entry_point, stack)?;
+        Ok(())
+    }
+
     fn run<const STACK_SIZE: usize>(
         &mut self,
         entry_point: usize,
@@ -288,7 +298,6 @@ impl<'a, 'b> Program<'a, 'b> {
         Ok(())
     }
 }
-
 
 fn read_static(index: usize, program: &[Word]) -> Result<Word, MachineError> {
     match program.get(index) {

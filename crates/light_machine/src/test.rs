@@ -17,7 +17,6 @@ fn get_test_program() -> MachineData {
     let static_data = [0u16; 0];
     let mut program = [0u16; 100];
 
-
     // main
     // globals, 0, 1, 2, on to stack
     program[0] = Ops::Load.into();
@@ -48,32 +47,34 @@ fn get_test_program() -> MachineData {
 
 #[test]
 fn test_init_get_color() -> Result<(), MachineError> {
- 
     let mut buffer = [0u16; 30];
     let machine_count = 1;
-    let program_builder = ProgramBuilder::new(&mut buffer, machine_count)
-        .expect("could not get machine builder");
+    let program_builder =
+        ProgramBuilder::new(&mut buffer, machine_count).expect("could not get machine builder");
 
     let function_count = 2;
     let globals_size = 3;
-    let machine = program_builder.new_machine(function_count, globals_size)
+    let machine = program_builder
+        .new_machine(function_count, globals_size)
         .expect("could not get new machine");
 
-    let mut function = machine.new_function()
+    let mut function = machine
+        .new_function()
         .expect("could not get fucntion builder");
     function.add_op(Op::Store(0)).expect("could not add op");
     function.add_op(Op::Store(1)).expect("could not add op");
     function.add_op(Op::Store(2)).expect("could not add op");
     function.add_op(Op::Return).expect("could not add op");
-    let (_function_index,machine) = function.finish();
+    let (_function_index, machine) = function.finish();
 
-    let mut function = machine.new_function()
+    let mut function = machine
+        .new_function()
         .expect("could not get fucntion builder");
     function.add_op(Op::Load(0)).expect("could not add op");
     function.add_op(Op::Load(1)).expect("could not add op");
     function.add_op(Op::Load(2)).expect("could not add op");
     function.add_op(Op::Return).expect("could not add op");
-    let (_function_index,machine) = function.finish();
+    let (_function_index, machine) = function.finish();
 
     let _program_builder = machine.finish();
 

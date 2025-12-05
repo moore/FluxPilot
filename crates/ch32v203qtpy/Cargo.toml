@@ -49,11 +49,10 @@ display-interface-spi = "0.5.0"
 embedded-hal = "1.0.0"
 embedded-graphics = "0.8.1"
 ssd1306 = "0.8.4"
-heapless  = { workspace = true}
+heapless  = { workspace = true }
 micromath = { version = "2.1.0", features = ["num-traits"] }
 smart-leds = "0.4.0"
 ws2812-spi = "0.5.0"
-bincode = { workspace = true}
 thiserror-no-std = {workspace = true}
 light_machine = {path = "../light_machine"}
 embassy-sync = "0.7.0"

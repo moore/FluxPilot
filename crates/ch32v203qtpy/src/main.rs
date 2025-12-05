@@ -9,13 +9,12 @@ use hal::spi::Spi;
 
 use embassy_executor::Spawner;
 use embassy_futures::join::join3;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::{Channel, Sender};
 use embassy_time::{Duration, Timer};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
-use embassy_sync::channel::{Channel, Sender};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-
 
 use ch32_hal::bind_interrupts;
 use ch32_hal::usbd::Driver;
@@ -30,14 +29,8 @@ use ws2812_spi as ws2812;
 use core::sync::atomic::AtomicU8;
 use core::sync::atomic::Ordering;
 use light_machine::{
-    builder::{
-        MachineBuilderError,
-        ProgramBuilder,
-        Op,
-    },
-    MachineError, 
-    Program,
-    Word,
+    builder::{MachineBuilderError, Op, ProgramBuilder},
+    MachineError, Program, Word,
 };
 
 use heapless::Vec;
@@ -51,8 +44,7 @@ const MODE_RED: u8 = 1;
 const MODE_GREEN: u8 = 2;
 const MODE_BLUE: u8 = 3;
 
-
-static CHANNEL: Channel::<CriticalSectionRawMutex, u8, 1> = Channel::new();
+static CHANNEL: Channel<CriticalSectionRawMutex, u8, 1> = Channel::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -75,7 +67,6 @@ async fn main(_spawner: Spawner) {
     config.manufacturer = Some("0xa9f4");
     config.product = Some("FluxPilot");
     config.serial_number = Some("314159");
-
 
     // Windows compatibility requires these; CDC-ACM
     //config.device_class = 0x02;
@@ -114,15 +105,14 @@ async fn main(_spawner: Spawner) {
 
     /////////////////////////////////////////////////
 
-
     let mut buffer = [0u16; 100];
     get_program(&mut buffer).expect("could not get program");
     let mut globals = [0u16; 10];
     let mut stack: Vec<Word, 100> = Vec::new();
-    let mut program = Program::new(buffer.as_slice(), globals.as_mut_slice()).expect("clould not init program");
+    let mut program =
+        Program::new(buffer.as_slice(), globals.as_mut_slice()).expect("clould not init program");
 
     let sender = CHANNEL.sender();
-
 
     // Do stuff with the class!
     let echo_fut = async {
@@ -133,7 +123,7 @@ async fn main(_spawner: Spawner) {
     };
 
     ////////////////////////////////////////////
-    
+
     // SPI1
     let mosi = p.PA7;
 
@@ -153,7 +143,6 @@ async fn main(_spawner: Spawner) {
         loop {
             for j in 0..(256 * 5) {
                 for i in 0..NUM_LEDS {
-                    
                     if let Ok(read_mode) = CHANNEL.try_receive() {
                         mode = read_mode;
                         match mode {
@@ -164,14 +153,16 @@ async fn main(_spawner: Spawner) {
 
                                 program.init_machine(0, &mut stack).unwrap();
                             }
-                            b'g' => {//MODE_GREEN => {
+                            b'g' => {
+                                //MODE_GREEN => {
                                 stack.push(0).unwrap();
                                 stack.push(128).unwrap();
                                 stack.push(0).unwrap();
 
                                 program.init_machine(0, &mut stack).unwrap();
                             }
-                            b'b' => {//MODE_BLUE => {
+                            b'b' => {
+                                //MODE_BLUE => {
                                 stack.push(0).unwrap();
                                 stack.push(0).unwrap();
                                 stack.push(128).unwrap();
@@ -189,13 +180,16 @@ async fn main(_spawner: Spawner) {
                     }
                     //let mode = MODE.load(Ordering::Relaxed);
                     match mode {
-                        b'c' => { //MODE_CYCLE => {
+                        b'c' => {
+                            //MODE_CYCLE => {
                             data[i] = wheel(
                                 (((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8,
                             );
                         }
                         _ => {
-                            if let Ok((red, green, blue)) = program.get_led_color(0, i as u16, &mut stack) {
+                            if let Ok((red, green, blue)) =
+                                program.get_led_color(0, i as u16, &mut stack)
+                            {
                                 data[i] = (red, green, blue).into();
                                 stack.clear();
                             } else {
@@ -215,8 +209,7 @@ async fn main(_spawner: Spawner) {
     join3(usb_fut, echo_fut, led_loop).await;
 }
 
-
-fn get_program(buffer: &mut [u16])-> Result<(), MachineBuilderError>{
+fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
     let machine_count = 1;
     let program_builder = ProgramBuilder::new(buffer, machine_count)?;
 
@@ -230,13 +223,14 @@ fn get_program(buffer: &mut [u16])-> Result<(), MachineBuilderError>{
     function.add_op(Op::Return)?;
     let (_function_index, machine) = function.finish();
 
-    let mut function = machine.new_function()
+    let mut function = machine
+        .new_function()
         .expect("could not get fucntion builder");
     function.add_op(Op::Load(0))?;
     function.add_op(Op::Load(1))?;
     function.add_op(Op::Load(2))?;
     function.add_op(Op::Return)?;
-    let (_function_index,machine) = function.finish();
+    let (_function_index, machine) = function.finish();
 
     let _program_builder = machine.finish();
 
@@ -271,7 +265,7 @@ impl From<EndpointError> for Disconnected {
 
 async fn echo<'d, T: Instance + 'd>(
     class: &mut CdcAcmClass<'d, Driver<'d, T>>,
-    tx: Sender<'static, CriticalSectionRawMutex, u8, 1>
+    tx: Sender<'static, CriticalSectionRawMutex, u8, 1>,
 ) -> Result<(), Disconnected> {
     let mut buf = [0; 64];
     loop {
@@ -279,7 +273,7 @@ async fn echo<'d, T: Instance + 'd>(
         let data = &buf[..n];
         if data.len() > 0 {
             // we don't care if were full just drop it
-            let _ = tx.try_send(data[0]);  
+            let _ = tx.try_send(data[0]);
             let mode = match data[0] {
                 b'c' => MODE_CYCLE,
                 b'r' => MODE_RED,
@@ -291,4 +285,3 @@ async fn echo<'d, T: Instance + 'd>(
         //class.write_packet(data).await?;
     }
 }
-

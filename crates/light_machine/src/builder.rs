@@ -1,4 +1,3 @@
-
 use super::*;
 
 #[derive(Error, Debug)]
@@ -14,7 +13,18 @@ pub enum MachineBuilderError {
 pub struct DataIndex(Word);
 
 /// Index for function.
+#[derive(Clone)]
 pub struct FunctionIndex(Word);
+
+impl FunctionIndex {
+    pub fn new(index: Word) -> Self {
+        Self(index)
+    }
+
+    pub fn to_word(&self) -> Word {
+        self.0
+    }
+}
 
 /// Program is
 /// [machine_count][machine offsets..][machines ...]
@@ -29,7 +39,6 @@ impl<'a> ProgramBuilder<'a> {
     const MACHINE_COUNT_OFFSET: usize = 0;
     const GLOBALS_SIZE_OFFSET: usize = 1;
     const FUNCTIONS_OFFSET: usize = 1;
-
 
     pub fn new(buffer: &'a mut [Word], machine_count: Word) -> Result<Self, MachineBuilderError> {
         // Assure `Words` can be cast to `usize`
@@ -60,7 +69,8 @@ impl<'a> ProgramBuilder<'a> {
     ) -> Result<MachineBuilder<'a>, MachineBuilderError> {
         self.buffer[Self::MACHINE_COUNT_OFFSET] = self.next_machine_builder;
         // SAFTY: checked in `new`
-        self.buffer[self.next_machine_builder as usize + Self::FUNCTIONS_OFFSET] = self.free as Word;
+        self.buffer[self.next_machine_builder as usize + Self::FUNCTIONS_OFFSET] =
+            self.free as Word;
         let globals_offset = self.buffer[Self::GLOBALS_SIZE_OFFSET];
         MachineBuilder::new(self, function_count, globals_size, globals_offset)
     }
@@ -80,7 +90,7 @@ impl<'a> ProgramBuilder<'a> {
         self.buffer[self.free as usize] = word;
         self.free += 1;
 
-        return Ok(())
+        return Ok(());
     }
 
     fn finish_machine(&mut self, globals_size: Word) {
@@ -146,7 +156,10 @@ impl<'a> MachineBuilder<'a> {
         Ok(FunctionBuilder::new(self, index))
     }
 
-    pub fn new_function_at_index(self, index: FunctionIndex) -> Result<FunctionBuilder<'a>, MachineBuilderError> {
+    pub fn new_function_at_index(
+        self,
+        index: FunctionIndex,
+    ) -> Result<FunctionBuilder<'a>, MachineBuilderError> {
         Ok(FunctionBuilder::new(self, index))
     }
 
@@ -164,7 +177,6 @@ impl<'a> MachineBuilder<'a> {
     }
 }
 
-
 pub enum Op {
     Push(Word),
     Pop,
@@ -180,7 +192,7 @@ pub struct FunctionBuilder<'a> {
 }
 
 impl<'a> FunctionBuilder<'a> {
-    pub fn new(machine: MachineBuilder<'a>, index: FunctionIndex) -> Self{
+    pub fn new(machine: MachineBuilder<'a>, index: FunctionIndex) -> Self {
         let function_start = machine.program.free;
         Self {
             machine,
@@ -221,8 +233,9 @@ impl<'a> FunctionBuilder<'a> {
     }
 
     pub fn finish(mut self) -> (FunctionIndex, MachineBuilder<'a>) {
-        let index = FunctionIndex(self.function_start);
-        self.machine.finish_function(self.function_start, self.index);
+        let index = self.index.clone();
+        self.machine
+            .finish_function(self.function_start, self.index);
         (index, self.machine)
     }
 }

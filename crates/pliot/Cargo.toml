@@ -1,0 +1,13 @@
+[package]
+name = "pliot"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+heapless = { workspace = true }
+thiserror-no-std = {workspace = true}
+postcard = { workspace = true }
+serde = { workspace = true }
+light_machine = {path = "../light_machine"}
+
+
