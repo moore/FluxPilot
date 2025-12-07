@@ -26,6 +26,12 @@ impl FunctionIndex {
     }
 }
 
+impl Into<u32> for FunctionIndex {
+    fn into(self) -> u32 {
+        self.0 as u32
+    }
+}
+
 /// Program is
 /// [machine_count][machine offsets..][machines ...]
 ///
@@ -36,10 +42,6 @@ pub struct ProgramBuilder<'a> {
 }
 
 impl<'a> ProgramBuilder<'a> {
-    const MACHINE_COUNT_OFFSET: usize = 0;
-    const GLOBALS_SIZE_OFFSET: usize = 1;
-    const FUNCTIONS_OFFSET: usize = 1;
-
     pub fn new(buffer: &'a mut [Word], machine_count: Word) -> Result<Self, MachineBuilderError> {
         // Assure `Words` can be cast to `usize`
         const { assert!(size_of::<Word>() <= size_of::<usize>()) };
@@ -53,12 +55,12 @@ impl<'a> ProgramBuilder<'a> {
             return Err(MachineBuilderError::BufferTooSmall);
         }
 
-        buffer[Self::MACHINE_COUNT_OFFSET] = 0; // Machine count
-        buffer[Self::GLOBALS_SIZE_OFFSET] = 0; // Globals size
+        buffer[MACHINE_COUNT_OFFSET] = 0; // Machine count
+        buffer[GLOBALS_SIZE_OFFSET] = 0; // Globals size
         Ok(Self {
             buffer,
             free: machine_count + 2,
-            next_machine_builder: 1,
+            next_machine_builder: 0,
         })
     }
 
@@ -67,11 +69,10 @@ impl<'a> ProgramBuilder<'a> {
         function_count: Word,
         globals_size: Word,
     ) -> Result<MachineBuilder<'a>, MachineBuilderError> {
-        self.buffer[Self::MACHINE_COUNT_OFFSET] = self.next_machine_builder;
+        self.buffer[MACHINE_COUNT_OFFSET] = self.next_machine_builder + 1;
         // SAFTY: checked in `new`
-        self.buffer[self.next_machine_builder as usize + Self::FUNCTIONS_OFFSET] =
-            self.free as Word;
-        let globals_offset = self.buffer[Self::GLOBALS_SIZE_OFFSET];
+        self.buffer[self.next_machine_builder as usize + MACHINE_TABLE_OFFSET] = self.free as Word;
+        let globals_offset = self.buffer[GLOBALS_SIZE_OFFSET];
         MachineBuilder::new(self, function_count, globals_size, globals_offset)
     }
 
@@ -94,17 +95,18 @@ impl<'a> ProgramBuilder<'a> {
     }
 
     fn finish_machine(&mut self, globals_size: Word) {
-        self.buffer[Self::GLOBALS_SIZE_OFFSET] += globals_size;
+        self.buffer[GLOBALS_SIZE_OFFSET] += globals_size;
         self.next_machine_builder += 1;
     }
 }
 
 /// Machine format is:
-/// [function offsets...][static data + functions...]
+/// [globals size][globals offset][function offsets...][static data + functions...]
 pub struct MachineBuilder<'a> {
     program: ProgramBuilder<'a>,
+    machine_start: Word,
     function_count: Word,
-    next_function: Word,
+    next_function_number: Word,
     function_end: Word,
     globals_size: Word,
 }
@@ -116,15 +118,16 @@ impl<'a> MachineBuilder<'a> {
         globals_size: Word,
         globals_offset: Word,
     ) -> Result<Self, MachineBuilderError> {
+        let machine_start = program.free;
         program.add_word(globals_size)?;
         program.add_word(globals_offset)?;
-        let next_function = program.free;
         program.allocate(function_count)?;
         let function_end = program.free;
         Ok(Self {
             program,
+            machine_start,
             function_count,
-            next_function,
+            next_function_number: 0,
             function_end,
             globals_size,
         })
@@ -143,11 +146,11 @@ impl<'a> MachineBuilder<'a> {
     }
 
     pub fn reserve_function(&mut self) -> Result<FunctionIndex, MachineBuilderError> {
-        if self.next_function >= self.function_end {
+        if self.next_function_number >= self.function_count {
             return Err(MachineBuilderError::FunctionCoutExceeded);
         }
-        let index = FunctionIndex(self.next_function);
-        self.next_function += 1;
+        let index = FunctionIndex(self.next_function_number);
+        self.next_function_number += 1;
         Ok(index)
     }
 
@@ -173,7 +176,8 @@ impl<'a> MachineBuilder<'a> {
     }
 
     fn finish_function(&mut self, function_start: Word, index: FunctionIndex) {
-        self.program.buffer[index.0 as usize] = function_start;
+        let index = self.machine_start as usize + MACHINE_FUNCTIONS_OFFSET + index.0 as usize;
+        self.program.buffer[index as usize] = function_start;
     }
 }
 

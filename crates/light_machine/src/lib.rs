@@ -108,10 +108,12 @@ pub enum MachineError {
     MachineIndexOutOfRange(Word),
 }
 
-const MACHINE_COUNT_OFFSET: usize = 0;
-const GLOBALS_SIZE_OFFSET: usize = 1;
-const FIRST_MACHINE_OFFSET: usize = 2;
-const INIT_OFFSET: usize = FIRST_MACHINE_OFFSET;
+pub const MACHINE_COUNT_OFFSET: usize = 0;
+pub const GLOBALS_SIZE_OFFSET: usize = MACHINE_COUNT_OFFSET + 1;
+pub const MACHINE_TABLE_OFFSET: usize = GLOBALS_SIZE_OFFSET + 1;
+pub const MACHINE_FUNCTIONS_OFFSET: usize = 2;
+
+const INIT_OFFSET: usize = 0;
 const GET_COLOR_OFFSET: usize = INIT_OFFSET + 1;
 
 pub struct Program<'a, 'b> {
@@ -152,11 +154,11 @@ impl<'a, 'b> Program<'a, 'b> {
             return Err(MachineError::MachineIndexOutOfRange(machine_number));
         };
         // BOOG check for function out of range.
-        let machine_slot = machine_number as usize;
+        let machine_slot = machine_number as usize + MACHINE_TABLE_OFFSET;
         let machine_index = read_static(machine_slot, self.static_data)?;
-        let index_function_index = (machine_index + 2) as usize + function_number;
+        let index_function_index =
+            machine_index as usize + MACHINE_FUNCTIONS_OFFSET + function_number;
         let entry_point = read_static(index_function_index, self.static_data)?;
-
         Ok(entry_point as usize)
     }
 

@@ -14,6 +14,7 @@ pub enum PliotError {
     MachineError(#[from] light_machine::MachineError),
     FunctionIndexOutOfRange,
     OutBufToSmall,
+    ResultTooLarge,
 }
 pub struct Pliot<
     'a,
@@ -56,15 +57,12 @@ impl<'a, 'b, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK
                         Err(MachineError::StackOverflow)?;
                     }
                 }
-                println!("stack before call: {:?}\nFunction: {:?}", stack, &function); //BOOG
                 self.program
                     .call(function.machine_index, function_index, stack)?;
 
                 if stack.len() > MAX_RESULT {
-                    // BOOG return error to the caller here
+                    return Err(PliotError::ResultTooLarge);
                 }
-
-                println!("stack after call: {:?}\nFunction: {:?}", stack, &function); //BOOG
 
                 let results: Vec<u16, MAX_RESULT> = stack.into_iter().map(|i| *i).collect();
 
@@ -73,18 +71,12 @@ impl<'a, 'b, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK
                     result: results,
                 };
 
-                let Ok(wrote) = postcard::to_slice_cobs(&result, out_buff) else {
-                    // BOOG return an error to the caller.
-                    return Ok(0);
-                };
+                let wrote = postcard::to_slice_cobs(&result, out_buff)?;
 
                 wrote.len()
             }
 
-            Protocol::Error {
-                request_id,
-                ..
-            } => {
+            Protocol::Error { request_id, .. } => {
                 // right now we send Error(s) we don't receive them but possibly
                 // one day we'll want to make RCPs aginst the UI? For now return
                 // a error if we get an error :P
@@ -124,24 +116,20 @@ impl<'a, 'b, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK
         Ok(sent_len)
     }
 
-
-    fn wrire_unexpected_message_type(request_id: Option<RequestId>, out_buff: &mut [u8]) -> Result<usize, PliotError> {
-        let result = Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>::Error { 
-            request_id, 
-            error_type: protocol::ErrorType::UnexpectedMessageType
+    fn wrire_unexpected_message_type(
+        request_id: Option<RequestId>,
+        out_buff: &mut [u8],
+    ) -> Result<usize, PliotError> {
+        let result = Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>::Error {
+            request_id,
+            error_type: protocol::ErrorType::UnexpectedMessageType,
         };
 
-        let Ok(wrote) = postcard::to_slice_cobs(&result, out_buff) else {
-            // BOOG return an error to the caller.
-            return Ok(0);
-        };
+        let wrote = postcard::to_slice_cobs(&result, out_buff)?;
 
         Ok(wrote.len())
     }
 }
-
-
-
 
 #[cfg(test)]
 mod test;

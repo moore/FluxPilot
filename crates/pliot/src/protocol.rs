@@ -27,7 +27,6 @@ pub enum ErrorType {
     UnknownMachine(u32),
     UnknownFucntion(u32),
     UnexpectedMessageType,
-
 }
 
 #[derive(Serialize, Deserialize, Debug)]

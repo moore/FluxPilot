@@ -66,7 +66,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
 
         let function = FunctionId {
             machine_index: 0,
-            funtion_index: 2, // store_function_index.to_word() as u32, //BOOG
+            funtion_index: store_function_index.into(),
         };
 
         let message = controler.call(function, args);
@@ -83,15 +83,16 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let response: ProtocolType =
             from_bytes_cobs(&mut out_buf[..wrote]).expect("could not read response");
 
-
         println!("return was {:?}", &response);
 
         match &response {
-            Protocol::Return { request_id: _, result } => {
+            Protocol::Return {
+                request_id: _,
+                result,
+            } => {
                 assert_eq!(result.len(), 0);
             }
             _ => panic!("response was not Return"),
-            
         }
         assert_eq!(message.get_request_id(), response.get_request_id());
     }
@@ -108,12 +109,12 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
 
         println!("stack is {:?}", stack);
 
-       let function = FunctionId {
+        let function = FunctionId {
             machine_index: 0,
-            funtion_index: 3, //get_function_index.to_word() as u32, // BOOG
+            funtion_index: get_function_index.into(),
         };
 
-        println!( "function id {:?}", &function);
+        println!("function id {:?}", &function);
 
         let message = controler.call(function, args);
 
@@ -129,11 +130,13 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let response: ProtocolType =
             from_bytes_cobs(&mut out_buf[..wrote]).expect("could not read response");
 
-
         println!("return was {:?}", &response);
 
-         match &response {
-            Protocol::Return { request_id: _, result } => {
+        match &response {
+            Protocol::Return {
+                request_id: _,
+                result,
+            } => {
                 assert_eq!(result.len(), 3);
                 let r = stack.pop().unwrap();
                 let g = stack.pop().unwrap();
@@ -142,7 +145,6 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
                 assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
             }
             _ => panic!("response was not Return"),
-            
         }
     }
 
