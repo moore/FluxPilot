@@ -1,3 +1,4 @@
+pub mod meme_storage;
 pub mod protocol;
 
 use heapless::Vec;
@@ -9,12 +10,40 @@ use thiserror_no_std::Error;
 use crate::protocol::RequestId;
 
 #[derive(Error, Debug)]
+pub enum StorageError {
+    ProgramTooLarge,
+    UnknownProgram,
+    InvalidProgram(MachineError),
+    UnexpectedBlock,
+}
+pub struct ProgramNumber(pub(crate) usize);
+
+pub trait Storage {
+    type L<'c>: ProgramLoader<'c>
+    where
+        Self: 'c;
+
+    fn get_program_loader<'a>(&'a mut self, size: u32) -> Result<Self::L<'a>, StorageError>;
+    fn get_program<'a, 'b>(
+        &'a mut self,
+        program_number: ProgramNumber,
+        globals: &'b mut [Word],
+    ) -> Result<Program<'a, 'b>, StorageError>;
+}
+
+pub trait ProgramLoader<'a> {
+    fn add_block(&mut self, block_number: u32, block: &[Word]) -> Result<(), StorageError>;
+    fn finish_load(self) -> Result<ProgramNumber, StorageError>;
+}
+
+#[derive(Error, Debug)]
 pub enum PliotError {
     Postcard(#[from] postcard::Error),
     MachineError(#[from] light_machine::MachineError),
     FunctionIndexOutOfRange,
     OutBufToSmall,
     ResultTooLarge,
+    StorageError(#[from] StorageError),
 }
 pub struct Pliot<
     'a,
@@ -22,15 +51,23 @@ pub struct Pliot<
     const MAX_ARGS: usize,
     const MAX_RESULT: usize,
     const PROGRAM_BLOCK_SIZE: usize,
+    S: Storage,
 > {
-    program: Program<'a, 'b>,
+    storage: &'a mut S,
+    memory: &'b mut [Word],
 }
 
-impl<'a, 'b, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZE: usize>
-    Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>
+impl<
+    'a,
+    'b,
+    const MAX_ARGS: usize,
+    const MAX_RESULT: usize,
+    const PROGRAM_BLOCK_SIZE: usize,
+    S: Storage,
+> Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, S>
 {
-    pub fn new<'c: 'a, 'd: 'b>(program: Program<'c, 'd>) -> Self {
-        Self { program }
+    pub fn new<'c: 'a, 'd: 'b>(storage: &'a mut S, memory: &'b mut [Word]) -> Self {
+        Self { storage, memory }
     }
 
     pub fn process_message<const STACK_SIZE: usize>(
@@ -57,8 +94,10 @@ impl<'a, 'b, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK
                         Err(MachineError::StackOverflow)?;
                     }
                 }
-                self.program
-                    .call(function.machine_index, function_index, stack)?;
+                let progroam_unmber = ProgramNumber(0);
+                let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
+
+                program.call(function.machine_index, function_index, stack)?;
 
                 if stack.len() > MAX_RESULT {
                     return Err(PliotError::ResultTooLarge);

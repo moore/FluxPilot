@@ -1,4 +1,7 @@
-use crate::protocol::{Controler, FunctionId};
+use crate::{
+    meme_storage::MemStorage,
+    protocol::{Controler, FunctionId},
+};
 
 use super::*;
 use light_machine::builder::*;
@@ -55,8 +58,12 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut stack: Vec<Word, 100> = Vec::new();
 
     {
-        let program = Program::new(buffer.as_slice(), globals.as_mut_slice())?;
-        let mut yoke = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>::new(program);
+        let mut storage = MemStorage::new(buffer.as_mut_slice());
+        let memory = globals.as_mut_slice();
+        let mut yoke = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory,
+        );
         let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
         let mut args = Vec::<u16, MAX_ARGS>::new();
 
@@ -102,8 +109,12 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     println!("memory {:?}", globals);
 
     {
-        let program = Program::new(buffer.as_slice(), globals.as_mut_slice())?;
-        let mut yoke = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>::new(program);
+        let mut storage = MemStorage::new(buffer.as_mut_slice());
+        let memory = globals.as_mut_slice();
+        let mut yoke = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory,
+        );
         let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
         let args = Vec::<u16, MAX_ARGS>::new();
 

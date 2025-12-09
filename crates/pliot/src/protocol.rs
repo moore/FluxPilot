@@ -1,5 +1,5 @@
 use heapless::Vec;
-use light_machine;
+use light_machine::Word;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +16,7 @@ pub struct MachineId(u32);
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FunctionId {
-    pub machine_index: light_machine::Word,
+    pub machine_index: Word,
     pub funtion_index: u32,
 }
 
@@ -57,13 +57,13 @@ pub enum Protocol<const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_
         request_id: RequestId,
         size: u32,
         block_number: u32,
-        block: Vec<u8, PROGRAM_BLOCK_SIZE>,
+        block: Vec<Word, PROGRAM_BLOCK_SIZE>,
     },
     /// Program Block
     ProgramBlock {
         request_id: RequestId,
         block_number: u32,
-        block: Vec<u8, PROGRAM_BLOCK_SIZE>,
+        block: Vec<Word, PROGRAM_BLOCK_SIZE>,
     },
     /// Finish the new program load
     FinishProgram { request_id: RequestId },
