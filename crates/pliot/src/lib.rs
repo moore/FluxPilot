@@ -19,21 +19,21 @@ pub enum StorageError {
 pub struct ProgramNumber(pub(crate) usize);
 
 pub trait Storage {
-    type L<'c>: ProgramLoader<'c>
-    where
-        Self: 'c;
+    type L: Sized;
 
-    fn get_program_loader<'a>(&'a mut self, size: u32) -> Result<Self::L<'a>, StorageError>;
+    fn get_program_loader<'a>(&'a mut self, size: u32) -> Result<Self::L, StorageError>;
+    fn add_block(
+        &mut self,
+        loader: &mut Self::L,
+        block_number: u32,
+        block: &[Word],
+    ) -> Result<(), StorageError>;
+    fn finish_load(&mut self, loader: Self::L) -> Result<ProgramNumber, StorageError>;
     fn get_program<'a, 'b>(
         &'a mut self,
         program_number: ProgramNumber,
         globals: &'b mut [Word],
     ) -> Result<Program<'a, 'b>, StorageError>;
-}
-
-pub trait ProgramLoader<'a> {
-    fn add_block(&mut self, block_number: u32, block: &[Word]) -> Result<(), StorageError>;
-    fn finish_load(self) -> Result<ProgramNumber, StorageError>;
 }
 
 #[derive(Error, Debug)]
@@ -45,6 +45,11 @@ pub enum PliotError {
     ResultTooLarge,
     StorageError(#[from] StorageError),
 }
+
+struct CurrentLoader<S: Storage> {
+    loader: S::L,
+    request_id: RequestId,
+}
 pub struct Pliot<
     'a,
     'b,
@@ -55,6 +60,7 @@ pub struct Pliot<
 > {
     storage: &'a mut S,
     memory: &'b mut [Word],
+    loader: Option<CurrentLoader<S>>,
 }
 
 impl<
@@ -67,7 +73,11 @@ impl<
 > Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, S>
 {
     pub fn new<'c: 'a, 'd: 'b>(storage: &'a mut S, memory: &'b mut [Word]) -> Self {
-        Self { storage, memory }
+        Self {
+            storage,
+            memory,
+            loader: None,
+        }
     }
 
     pub fn process_message<const STACK_SIZE: usize>(
@@ -84,7 +94,6 @@ impl<
                 function,
                 args,
             } => {
-                println!("Protocol::Call");
                 let Ok(function_index) = function.funtion_index.try_into() else {
                     return Err(PliotError::FunctionIndexOutOfRange);
                 };
@@ -141,15 +150,60 @@ impl<
                 size,
                 block_number,
                 block,
-            } => 0,
+            } => {
+                let mut loader = self.storage.get_program_loader(size)?;
+                self.storage
+                    .add_block(&mut loader, block_number, block.as_slice())?;
+                let current_loader = CurrentLoader { loader, request_id };
+                self.loader = Some(current_loader);
+                0
+            }
 
             Protocol::ProgramBlock {
                 request_id,
                 block_number,
                 block,
-            } => 0,
+            } => {
+                match &mut self.loader {
+                    None => {
+                        // BOOG: should return unexpted request it
+                        Self::wrire_unexpected_message_type(None, out_buff)?
+                    }
+                    Some(current) => {
+                        if current.request_id != request_id {
+                            // BOOG: should return unexpted request it
+                            Self::wrire_unexpected_message_type(None, out_buff)?
+                        } else {
+                            self.storage.add_block(
+                                &mut current.loader,
+                                block_number,
+                                block.as_slice(),
+                            )?;
+                            0
+                        }
+                    }
+                }
+            }
 
-            Protocol::FinishProgram { request_id } => 0,
+            Protocol::FinishProgram { request_id } => {
+                let current = self.loader.take();
+                match current {
+                    None => {
+                        // BOOG: should return unexpted request it
+                        Self::wrire_unexpected_message_type(None, out_buff)?
+                    }
+                    Some(current) => {
+                        if current.request_id != request_id {
+                            // BOOG: should return unexpted request it
+                            self.loader = Some(current);
+                            Self::wrire_unexpected_message_type(None, out_buff)?
+                        } else {
+                            self.storage.finish_load(current.loader)?;
+                            0
+                        }
+                    }
+                }
+            }
         };
 
         Ok(sent_len)

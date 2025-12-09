@@ -1,4 +1,4 @@
-use crate::{Program, ProgramLoader, ProgramNumber, Storage, StorageError, Word};
+use crate::{Program, ProgramNumber, Storage, StorageError, Word};
 
 pub struct MemStorage<'a> {
     program: &'a mut [Word],
@@ -15,13 +15,10 @@ impl<'a> MemStorage<'a> {
 }
 
 impl<'a> Storage for MemStorage<'a> {
-    type L<'c>
-        = MemProgrameLoader<'c>
-    where
-        Self: 'c;
+    type L = MemProgrameLoader;
 
     /// `size`` is in instrction count
-    fn get_program_loader<'b>(&'b mut self, size: u32) -> Result<Self::L<'b>, StorageError> {
+    fn get_program_loader(&mut self, size: u32) -> Result<Self::L, StorageError> {
         let size: usize = size.try_into().map_err(|_| StorageError::ProgramTooLarge)?;
 
         if size > self.program.len() - self.next_program {
@@ -31,11 +28,20 @@ impl<'a> Storage for MemStorage<'a> {
         let program_start = self.next_program;
         self.next_program += size;
 
-        Ok(MemProgrameLoader::new(
-            self.program,
-            program_start,
-            self.next_program,
-        ))
+        Ok(MemProgrameLoader::new(program_start, self.next_program))
+    }
+
+    fn add_block(
+        &mut self,
+        loader: &mut Self::L,
+        block_number: u32,
+        block: &[Word],
+    ) -> Result<(), StorageError> {
+        loader.add_block(self.program, block_number, block)
+    }
+
+    fn finish_load(&mut self, loader: Self::L) -> Result<ProgramNumber, StorageError> {
+        loader.finish_load()
     }
 
     fn get_program<'b, 'c>(
@@ -54,28 +60,29 @@ impl<'a> Storage for MemStorage<'a> {
     }
 }
 
-pub struct MemProgrameLoader<'a> {
-    program: &'a mut [Word],
+pub struct MemProgrameLoader {
     program_start: usize,
     program_end: usize,
     next_block: u32,
     next_word: usize,
 }
 
-impl<'a> MemProgrameLoader<'a> {
-    fn new(program: &'a mut [Word], program_start: usize, program_end: usize) -> Self {
+impl MemProgrameLoader {
+    fn new(program_start: usize, program_end: usize) -> Self {
         return Self {
-            program,
             program_start,
             program_end,
             next_block: 0,
             next_word: program_start,
         };
     }
-}
 
-impl<'a> ProgramLoader<'a> for MemProgrameLoader<'a> {
-    fn add_block(&mut self, block_number: u32, block: &[Word]) -> Result<(), StorageError> {
+    fn add_block(
+        &mut self,
+        program: &mut [Word],
+        block_number: u32,
+        block: &[Word],
+    ) -> Result<(), StorageError> {
         if block_number != self.next_block {
             return Err(StorageError::UnexpectedBlock);
         }
@@ -87,7 +94,7 @@ impl<'a> ProgramLoader<'a> for MemProgrameLoader<'a> {
                 return Err(StorageError::ProgramTooLarge);
             }
 
-            self.program[next_word] = *word;
+            program[next_word] = *word;
             next_word += 1;
         }
 
