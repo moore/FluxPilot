@@ -107,7 +107,6 @@ pub struct MachineBuilder<'a> {
     machine_start: Word,
     function_count: Word,
     next_function_number: Word,
-    function_end: Word,
     globals_size: Word,
 }
 
@@ -122,13 +121,11 @@ impl<'a> MachineBuilder<'a> {
         program.add_word(globals_size)?;
         program.add_word(globals_offset)?;
         program.allocate(function_count)?;
-        let function_end = program.free;
         Ok(Self {
             program,
             machine_start,
             function_count,
             next_function_number: 0,
-            function_end,
             globals_size,
         })
     }

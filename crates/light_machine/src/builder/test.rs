@@ -1,6 +1,5 @@
 use super::*;
 extern crate std;
-use std::dbg;
 
 #[test]
 fn test_new_builder() -> Result<(), MachineBuilderError> {
@@ -35,13 +34,13 @@ fn test_new_machine_builder() -> Result<(), MachineBuilderError> {
 
     let mut machine = program.new_machine(function_count, 0)?;
     let data = [17, 31, 71];
-    let index = machine.add_static(data.as_slice())?;
+    let _index = machine.add_static(data.as_slice())?;
     let program = machine.finish();
 
     let mut machine = program.new_machine(function_count, 0)?;
     let data = [7, 11, 97];
-    let index = machine.add_static(data.as_slice())?;
-    let program = machine.finish();
+    let _index = machine.add_static(data.as_slice())?;
+    let _program = machine.finish();
 
     assert_eq!(buffer, goal);
     Ok(())
@@ -79,7 +78,7 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
 
     let mut machine = program.new_machine(function_count, globals_size)?;
     let data = [17, 31, 71];
-    let index = machine.add_static(data.as_slice())?;
+    let _index = machine.add_static(data.as_slice())?;
     let funtion_index = machine.reserve_function()?;
 
     let mut function = machine.new_function()?;
@@ -87,14 +86,14 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
     function.add_op(Op::Load(0))?;
     function.add_op(Op::Store(1))?;
     function.add_op(Op::Return)?;
-    let (fn_index, machine) = function.finish();
+    let (_fn_index, machine) = function.finish();
 
     let mut function = machine.new_function_at_index(funtion_index)?;
     function.add_op(Op::Load(1))?;
     function.add_op(Op::Return)?;
-    let (fn_index, machine) = function.finish();
+    let (_fn_index, machine) = function.finish();
 
-    let program: ProgramBuilder<'_> = machine.finish();
+    let _program: ProgramBuilder<'_> = machine.finish();
 
     assert_eq!(buffer, goal);
     Ok(())
