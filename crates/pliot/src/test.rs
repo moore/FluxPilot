@@ -60,7 +60,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     {
         let mut storage = MemStorage::new(buffer.as_mut_slice());
         let memory = globals.as_mut_slice();
-        let mut yoke = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
+        let mut pliot = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
             &mut storage,
             memory,
         );
@@ -81,7 +81,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
         let mut out_buf = vec![0u8; 1024];
 
-        let wrote = yoke
+        let wrote = pliot
             .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())
             .expect("Call had error");
 
@@ -111,7 +111,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     {
         let mut storage = MemStorage::new(buffer.as_mut_slice());
         let memory = globals.as_mut_slice();
-        let mut yoke = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
+        let mut pliot = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
             &mut storage,
             memory,
         );
@@ -132,7 +132,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
         let mut out_buf = vec![0u8; 1024];
 
-        let wrote = yoke
+        let wrote = pliot
             .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())
             .expect("Call had error");
 
