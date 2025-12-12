@@ -98,6 +98,10 @@ impl<'a> ProgramBuilder<'a> {
         self.buffer[GLOBALS_SIZE_OFFSET] += globals_size;
         self.next_machine_builder += 1;
     }
+
+    pub fn finish_program(self) -> usize {
+        self.free as usize
+    }
 }
 
 /// Machine format is:

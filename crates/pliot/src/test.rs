@@ -49,22 +49,42 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     function.add_op(Op::Return).expect("could not add op");
     let (get_function_index, machine) = function.finish();
 
-    let _program_builder = machine.finish();
+    let program_builder = machine.finish();
 
-    println!("program {:?}", buffer);
+    let length = program_builder.finish_program();
 
-    let mut globals = [0u16; 10];
-    let (red, green, blue) = (17, 23, 31);
+    let program = &buffer[0..length];
+
+    println!("program {:?}", program);
+
+    let mut storage_buffer = [0u16; 100];
+    let mut storage = MemStorage::new(storage_buffer.as_mut_slice());
+
+    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
+
     let mut stack: Vec<Word, 100> = Vec::new();
+    let mut globals = [0u16; 10];
+    let memory = globals.as_mut_slice();
+    let mut pliot =
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(&mut storage, memory);
+
+    let loader = controler.get_program_loader(program);
+
+    let mut out_buf = vec![0u8; 1024];
+
+    for message in loader {
+        let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
+
+        let wrote = pliot
+            .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())
+            .expect("Call had error");
+
+        assert_eq!(0, wrote);
+    }
+
+    let (red, green, blue) = (17, 23, 31);
 
     {
-        let mut storage = MemStorage::new(buffer.as_mut_slice());
-        let memory = globals.as_mut_slice();
-        let mut pliot = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
-            &mut storage,
-            memory,
-        );
-        let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
         let mut args = Vec::<u16, MAX_ARGS>::new();
 
         args.push(red).unwrap();
@@ -79,7 +99,6 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let message = controler.call(function, args);
 
         let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
-        let mut out_buf = vec![0u8; 1024];
 
         let wrote = pliot
             .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())
@@ -106,16 +125,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
 
     assert_eq!(stack.len(), 0);
 
-    println!("memory {:?}", globals);
-
     {
-        let mut storage = MemStorage::new(buffer.as_mut_slice());
-        let memory = globals.as_mut_slice();
-        let mut pliot = Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(
-            &mut storage,
-            memory,
-        );
-        let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
         let args = Vec::<u16, MAX_ARGS>::new();
 
         println!("stack is {:?}", stack);
@@ -130,7 +140,6 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let message = controler.call(function, args);
 
         let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
-        let mut out_buf = vec![0u8; 1024];
 
         let wrote = pliot
             .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())

@@ -1,3 +1,5 @@
+use core::cmp::min;
+
 use heapless::Vec;
 use light_machine::Word;
 use serde::{Deserialize, Serialize};
@@ -113,8 +115,97 @@ impl<const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZE: u
         }
     }
 
+    pub fn get_program_loader<'a>(
+        &mut self,
+        program: &'a [Word],
+    ) -> ProgramLoader<'a, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> {
+        let request_id = self.get_request_id();
+        ProgramLoader::new(request_id, program)
+    }
+
     fn get_request_id(&mut self) -> RequestId {
         self.next_request += 1;
         RequestId(self.next_request)
+    }
+}
+
+pub struct ProgramLoader<
+    'a,
+    const MAX_ARGS: usize,
+    const MAX_RESULT: usize,
+    const PROGRAM_BLOCK_SIZE: usize,
+> {
+    request_id: RequestId,
+    next_block: u32,
+    next_offset: usize,
+    program: &'a [Word],
+    finished: bool,
+}
+
+impl<'a, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZE: usize> Iterator
+    for ProgramLoader<'a, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>
+{
+    type Item = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_message()
+    }
+}
+
+impl<'a, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZE: usize>
+    ProgramLoader<'a, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>
+{
+    fn new(request_id: RequestId, program: &'a [Word]) -> Self {
+        Self {
+            request_id,
+            next_block: 0,
+            next_offset: 0,
+            program,
+            finished: false,
+        }
+    }
+
+    pub fn next_message(&mut self) -> Option<Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>> {
+        if self.program.len() <= self.next_offset {
+            if self.finished {
+                return None;
+            } else {
+                self.finished = true;
+                return Some(Protocol::FinishProgram {
+                    request_id: self.request_id,
+                });
+            }
+        }
+
+        let request_id = self.request_id;
+
+        let start = self.next_offset;
+        let end = min(self.program.len(), start + PROGRAM_BLOCK_SIZE);
+        let chunk = &self.program[start..end];
+        self.next_offset += chunk.len();
+
+        let Ok(block) = Vec::from_slice(chunk) else {
+            return None; // This should not happen
+        };
+
+        let block_number = self.next_block;
+        self.next_block += 1;
+
+        let message = if start == 0 {
+            Protocol::LoadProgram {
+                request_id,
+                size: self.program.len() as u32,
+                block_number,
+                block,
+            }
+        } else {
+            Protocol::ProgramBlock {
+                request_id,
+                block_number,
+                block,
+            }
+        };
+
+        Some(message)
     }
 }
