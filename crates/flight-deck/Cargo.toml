@@ -1,0 +1,16 @@
+[package]
+name = "flight-deck"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+heapless = { workspace = true }
+thiserror-no-std = {workspace = true}
+postcard = { workspace = true }
+serde = { workspace = true }
+light_machine = {path = "../light_machine"}
+pliot = {path = "../pliot"}

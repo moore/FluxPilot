@@ -5,6 +5,8 @@ use heapless::Vec;
 use thiserror_no_std::Error;
 use variant_count::VariantCount;
 
+use crate::builder::FunctionIndex;
+
 pub mod builder;
 /// This module implments the vitural machine for FluxPilot.
 /// A machine takes three memory regions when it is initilized:
@@ -115,6 +117,45 @@ pub const MACHINE_FUNCTIONS_OFFSET: usize = 2;
 
 const INIT_OFFSET: usize = 0;
 const GET_COLOR_OFFSET: usize = INIT_OFFSET + 1;
+
+pub struct MachineDescriptor<const FUNCTION_COUNT_MAX: usize> {
+    pub functions: Vec<FunctionIndex, FUNCTION_COUNT_MAX>,
+}
+
+impl<const FUNCTION_COUNT_MAX: usize> MachineDescriptor<FUNCTION_COUNT_MAX> {
+    pub fn new() -> Self {
+        Self {
+            functions: Vec::new(),
+        }
+    }
+
+    pub fn add_function(&mut self, index: FunctionIndex) -> Result<(), FunctionIndex> {
+        self.functions.push(index)
+    }
+}
+
+pub struct ProgramDescriptor<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
+    pub length: usize,
+    pub machines: Vec<MachineDescriptor<FUNCTION_COUNT_MAX>, MACHINE_COUNT_MAX>,
+}
+
+impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
+    ProgramDescriptor<MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
+{
+    pub fn new() -> Self {
+        Self {
+            length: 0,
+            machines: Vec::new(),
+        }
+    }
+
+    pub fn add_machine(
+        &mut self,
+        machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>,
+    ) -> Result<(), MachineDescriptor<FUNCTION_COUNT_MAX>> {
+        self.machines.push(machine_descriptor)
+    }
+}
 
 pub struct Program<'a, 'b> {
     static_data: &'a [Word],

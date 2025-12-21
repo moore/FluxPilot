@@ -21,14 +21,15 @@ type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 #[test]
 fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut buffer = [0u16; 30];
-    let machine_count = 1;
+    const MACHINE_COUNT: usize = 1;
+    const FUNCTION_COUNT: usize = 2;
     let program_builder =
-        ProgramBuilder::new(&mut buffer, machine_count).expect("could not get machine builder");
+        ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as u16)
+            .expect("could not get machine builder");
 
-    let function_count = 2;
     let globals_size = 3;
     let machine = program_builder
-        .new_machine(function_count, globals_size)
+        .new_machine(FUNCTION_COUNT as u16, globals_size)
         .expect("could not get new machine");
 
     let mut function = machine
@@ -38,7 +39,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     function.add_op(Op::Store(1)).expect("could not add op");
     function.add_op(Op::Store(2)).expect("could not add op");
     function.add_op(Op::Return).expect("could not add op");
-    let (store_function_index, machine) = function.finish();
+    let (_, machine) = function.finish().expect("Could not finish function");
 
     let mut function = machine
         .new_function()
@@ -47,13 +48,13 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     function.add_op(Op::Load(1)).expect("could not add op");
     function.add_op(Op::Load(2)).expect("could not add op");
     function.add_op(Op::Return).expect("could not add op");
-    let (get_function_index, machine) = function.finish();
+    let (_, machine) = function.finish().expect("Could not finish function");
 
-    let program_builder = machine.finish();
+    let program_builder = machine.finish().expect("Could not finish program");
 
-    let length = program_builder.finish_program();
+    let descriptor = program_builder.finish_program();
 
-    let program = &buffer[0..length];
+    let program = &buffer[0..descriptor.length];
 
     println!("program {:?}", program);
 
@@ -91,6 +92,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         args.push(green).unwrap();
         args.push(blue).unwrap();
 
+        let store_function_index = descriptor.machines[0].functions[0].clone();
         let function = FunctionId {
             machine_index: 0,
             funtion_index: store_function_index.into(),
@@ -129,7 +131,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let args = Vec::<u16, MAX_ARGS>::new();
 
         println!("stack is {:?}", stack);
-
+        let get_function_index = descriptor.machines[0].functions[1].clone();
         let function = FunctionId {
             machine_index: 0,
             funtion_index: get_function_index.into(),

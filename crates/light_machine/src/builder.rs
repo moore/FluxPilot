@@ -7,6 +7,7 @@ pub enum MachineBuilderError {
     TooLarge(usize),
     FunctionCoutExceeded,
     GlobalOutOfRange(Word),
+    MachineCountExceeded,
 }
 
 /// Index for static data.
@@ -35,13 +36,16 @@ impl Into<u32> for FunctionIndex {
 /// Program is
 /// [machine_count][machine offsets..][machines ...]
 ///
-pub struct ProgramBuilder<'a> {
+pub struct ProgramBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     buffer: &'a mut [Word],
     next_machine_builder: Word,
     free: Word,
+    descriptor: ProgramDescriptor<MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
 }
 
-impl<'a> ProgramBuilder<'a> {
+impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
+    ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
+{
     pub fn new(buffer: &'a mut [Word], machine_count: Word) -> Result<Self, MachineBuilderError> {
         // Assure `Words` can be cast to `usize`
         const { assert!(size_of::<Word>() <= size_of::<usize>()) };
@@ -61,6 +65,7 @@ impl<'a> ProgramBuilder<'a> {
             buffer,
             free: machine_count + 2,
             next_machine_builder: 0,
+            descriptor: ProgramDescriptor::new(),
         })
     }
 
@@ -68,7 +73,8 @@ impl<'a> ProgramBuilder<'a> {
         self,
         function_count: Word,
         globals_size: Word,
-    ) -> Result<MachineBuilder<'a>, MachineBuilderError> {
+    ) -> Result<MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError>
+    {
         self.buffer[MACHINE_COUNT_OFFSET] = self.next_machine_builder + 1;
         // SAFTY: checked in `new`
         self.buffer[self.next_machine_builder as usize + MACHINE_TABLE_OFFSET] = self.free as Word;
@@ -94,29 +100,38 @@ impl<'a> ProgramBuilder<'a> {
         return Ok(());
     }
 
-    fn finish_machine(&mut self, globals_size: Word) {
+    fn finish_machine(&mut self, globals_size: Word, machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>) -> Result<(), MachineBuilderError>{
+        if self.descriptor.add_machine(machine_descriptor).is_err() {
+            return Err(MachineBuilderError::MachineCountExceeded);
+        }
         self.buffer[GLOBALS_SIZE_OFFSET] += globals_size;
         self.next_machine_builder += 1;
+        Ok(())
     }
 
-    pub fn finish_program(self) -> usize {
-        self.free as usize
+    pub fn finish_program(self) -> ProgramDescriptor<MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX> {
+        let mut descriptor = self.descriptor;
+        descriptor.length = self.free as usize;
+        descriptor
     }
 }
 
 /// Machine format is:
 /// [globals size][globals offset][function offsets...][static data + functions...]
-pub struct MachineBuilder<'a> {
-    program: ProgramBuilder<'a>,
+pub struct MachineBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
+    program: ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
     machine_start: Word,
     function_count: Word,
     next_function_number: Word,
     globals_size: Word,
+    discriptor: MachineDescriptor<FUNCTION_COUNT_MAX>,
 }
 
-impl<'a> MachineBuilder<'a> {
+impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
+    MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
+{
     pub fn new(
-        mut program: ProgramBuilder<'a>,
+        mut program: ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
         function_count: Word,
         globals_size: Word,
         globals_offset: Word,
@@ -131,6 +146,7 @@ impl<'a> MachineBuilder<'a> {
             function_count,
             next_function_number: 0,
             globals_size,
+            discriptor: MachineDescriptor::new(),
         })
     }
 
@@ -155,7 +171,10 @@ impl<'a> MachineBuilder<'a> {
         Ok(index)
     }
 
-    pub fn new_function(mut self) -> Result<FunctionBuilder<'a>, MachineBuilderError> {
+    pub fn new_function(
+        mut self,
+    ) -> Result<FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError>
+    {
         let index = self.reserve_function()?;
         Ok(FunctionBuilder::new(self, index))
     }
@@ -163,22 +182,31 @@ impl<'a> MachineBuilder<'a> {
     pub fn new_function_at_index(
         self,
         index: FunctionIndex,
-    ) -> Result<FunctionBuilder<'a>, MachineBuilderError> {
+    ) -> Result<FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError>
+    {
         Ok(FunctionBuilder::new(self, index))
     }
 
-    pub fn finish(mut self) -> ProgramBuilder<'a> {
-        self.program.finish_machine(self.globals_size);
-        self.program
+    pub fn finish(mut self) -> Result<ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError> {
+        self.program.finish_machine(self.globals_size, self.discriptor)?;
+        Ok(self.program)
     }
 
     fn add_word(&mut self, word: Word) -> Result<(), MachineBuilderError> {
         self.program.add_word(word)
     }
 
-    fn finish_function(&mut self, function_start: Word, index: FunctionIndex) {
+    fn finish_function(
+        &mut self,
+        function_start: Word,
+        index: FunctionIndex,
+    ) -> Result<(), MachineBuilderError> {
+        if self.discriptor.add_function(index.clone()).is_err() {
+            return Err(MachineBuilderError::FunctionCoutExceeded);
+        }
         let index = self.machine_start as usize + MACHINE_FUNCTIONS_OFFSET + index.0 as usize;
         self.program.buffer[index as usize] = function_start;
+        Ok(())
     }
 }
 
@@ -190,14 +218,19 @@ pub enum Op {
     Return,
 }
 
-pub struct FunctionBuilder<'a> {
-    machine: MachineBuilder<'a>,
+pub struct FunctionBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
+    machine: MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
     function_start: Word,
     index: FunctionIndex,
 }
 
-impl<'a> FunctionBuilder<'a> {
-    pub fn new(machine: MachineBuilder<'a>, index: FunctionIndex) -> Self {
+impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
+    FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
+{
+    pub fn new(
+        machine: MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
+        index: FunctionIndex,
+    ) -> Self {
         let function_start = machine.program.free;
         Self {
             machine,
@@ -237,11 +270,19 @@ impl<'a> FunctionBuilder<'a> {
         Ok(())
     }
 
-    pub fn finish(mut self) -> (FunctionIndex, MachineBuilder<'a>) {
+    pub fn finish(
+        mut self,
+    ) -> Result<
+        (
+            FunctionIndex,
+            MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
+        ),
+        MachineBuilderError,
+    > {
         let index = self.index.clone();
         self.machine
-            .finish_function(self.function_start, self.index);
-        (index, self.machine)
+            .finish_function(self.function_start, self.index)?;
+        Ok((index, self.machine))
     }
 }
 
