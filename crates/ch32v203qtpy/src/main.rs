@@ -11,7 +11,7 @@ use embassy_executor::Spawner;
 use embassy_futures::join::join3;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Sender};
-use embassy_time::{Duration, Timer};
+use embassy_time::Timer;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
@@ -26,12 +26,12 @@ use crate::ws2812::Ws2812;
 use smart_leds::{brightness, SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
 
-use core::sync::atomic::AtomicU8;
-use core::sync::atomic::Ordering;
 use light_machine::{
     builder::{MachineBuilderError, Op, ProgramBuilder},
-    MachineError, Program, Word,
+    Program, Word,
 };
+use pliot::protocol::Protocol;
+use postcard::from_bytes_cobs;
 
 use heapless::Vec;
 
@@ -39,12 +39,14 @@ bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;
 });
 
-const MODE_CYCLE: u8 = 0;
-const MODE_RED: u8 = 1;
-const MODE_GREEN: u8 = 2;
-const MODE_BLUE: u8 = 3;
+const MAX_ARGS: usize = 3;
+const MAX_RESULT: usize = 3;
+const PROGRAM_BLOCK_SIZE: usize = 100;
+const INCOMING_MESSAGE_CAP: usize = 128;
 
-static CHANNEL: Channel<CriticalSectionRawMutex, u8, 1> = Channel::new();
+type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
+
+static CHANNEL: Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1> = Channel::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -118,7 +120,7 @@ async fn main(_spawner: Spawner) {
     let echo_fut = async {
         loop {
             class.wait_connection().await;
-            let _ = echo(&mut class, sender).await;
+            let _ = usb_receiver(&mut class, sender).await;
         }
     };
 
@@ -139,63 +141,26 @@ async fn main(_spawner: Spawner) {
     let mut data = [RGB8::default(); NUM_LEDS];
 
     let led_loop = async {
-        let mut mode = b'c';
+        let mut use_program = false;
         loop {
             for j in 0..(256 * 5) {
-                for i in 0..NUM_LEDS {
-                    if let Ok(read_mode) = CHANNEL.try_receive() {
-                        mode = read_mode;
-                        match mode {
-                            b'r' => {
-                                stack.push(128).unwrap();
-                                stack.push(0).unwrap();
-                                stack.push(0).unwrap();
-
-                                program.init_machine(0, &mut stack).unwrap();
-                            }
-                            b'g' => {
-                                //MODE_GREEN => {
-                                stack.push(0).unwrap();
-                                stack.push(128).unwrap();
-                                stack.push(0).unwrap();
-
-                                program.init_machine(0, &mut stack).unwrap();
-                            }
-                            b'b' => {
-                                //MODE_BLUE => {
-                                stack.push(0).unwrap();
-                                stack.push(0).unwrap();
-                                stack.push(128).unwrap();
-
-                                program.init_machine(0, &mut stack).unwrap();
-                            }
-                            _ => {
-                                stack.push(128).unwrap();
-                                stack.push(0).unwrap();
-                                stack.push(0).unwrap();
-
-                                program.init_machine(0, &mut stack).unwrap();
-                            }
-                        }
+                while let Ok(mut message) = CHANNEL.try_receive() {
+                    if handle_message(message.as_mut_slice(), &mut program, &mut stack) {
+                        use_program = true;
                     }
-                    //let mode = MODE.load(Ordering::Relaxed);
-                    match mode {
-                        b'c' => {
-                            //MODE_CYCLE => {
-                            data[i] = wheel(
-                                (((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8,
-                            );
+                }
+                for i in 0..NUM_LEDS {
+                    if use_program {
+                        if let Ok((red, green, blue)) =
+                            program.get_led_color(0, i as u16, &mut stack)
+                        {
+                            data[i] = (red, green, blue).into();
+                            stack.clear();
                         }
-                        _ => {
-                            if let Ok((red, green, blue)) =
-                                program.get_led_color(0, i as u16, &mut stack)
-                            {
-                                data[i] = (red, green, blue).into();
-                                stack.clear();
-                            } else {
-                                // ???
-                            }
-                        }
+                    } else {
+                        data[i] = wheel(
+                            (((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8,
+                        );
                     }
                 }
                 ws.write(brightness(data.iter().cloned(), 2)).unwrap();
@@ -210,18 +175,19 @@ async fn main(_spawner: Spawner) {
 }
 
 fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
-    let machine_count = 1;
-    let program_builder = ProgramBuilder::new(buffer, machine_count)?;
+    const MACHINE_COUNT: usize = 1;
+    const FUNCTION_COUNT: usize = 2;
+    let program_builder =
+        ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(buffer, MACHINE_COUNT as u16)?;
 
-    let function_count = 2;
     let globals_size = 3;
-    let machine = program_builder.new_machine(function_count, globals_size)?;
+    let machine = program_builder.new_machine(FUNCTION_COUNT as u16, globals_size)?;
     let mut function = machine.new_function()?;
     function.add_op(Op::Store(0))?;
     function.add_op(Op::Store(1))?;
     function.add_op(Op::Store(2))?;
     function.add_op(Op::Return)?;
-    let (_function_index, machine) = function.finish();
+    let (_function_index, machine) = function.finish()?;
 
     let mut function = machine
         .new_function()
@@ -230,9 +196,9 @@ fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
     function.add_op(Op::Load(1))?;
     function.add_op(Op::Load(2))?;
     function.add_op(Op::Return)?;
-    let (_function_index, machine) = function.finish();
+    let (_function_index, machine) = function.finish()?;
 
-    let _program_builder = machine.finish();
+    let _program_builder = machine.finish()?;
 
     Ok(())
 }
@@ -263,25 +229,61 @@ impl From<EndpointError> for Disconnected {
     }
 }
 
-async fn echo<'d, T: Instance + 'd>(
+async fn usb_receiver<'d, T: Instance + 'd>(
     class: &mut CdcAcmClass<'d, Driver<'d, T>>,
-    tx: Sender<'static, CriticalSectionRawMutex, u8, 1>,
+    tx: Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
 ) -> Result<(), Disconnected> {
     let mut buf = [0; 64];
+    let mut frame: Vec<u8, INCOMING_MESSAGE_CAP> = Vec::new();
     loop {
         let n = class.read_packet(&mut buf).await?;
         let data = &buf[..n];
-        if data.len() > 0 {
-            // we don't care if were full just drop it
-            let _ = tx.try_send(data[0]);
-            let mode = match data[0] {
-                b'c' => MODE_CYCLE,
-                b'r' => MODE_RED,
-                b'g' => MODE_GREEN,
-                b'b' => MODE_BLUE,
-                _ => MODE_RED,
+        for &byte in data {
+            if frame.push(byte).is_err() {
+                // TODO: Track overflow and discard bytes until the next 0 delimiter to avoid decoding a partial frame.
+                // TODO: Send an error response so the sender knows the frame exceeded the size limit.
+                frame.clear();
+                continue;
+            }
+
+            if byte == 0 {
+                let message = frame.clone();
+                frame.clear();
+                let _ = tx.try_send(message);
+            }
+        }
+    }
+}
+
+fn handle_message<const STACK_SIZE: usize>(
+    message: &mut [u8],
+    program: &mut Program<'_, '_>,
+    stack: &mut Vec<Word, STACK_SIZE>,
+) -> bool {
+    let Ok(decoded) = from_bytes_cobs::<ProtocolType>(message) else {
+        // TODO: Send an error response so the sender knows the message was too large or corrupted.
+        stack.clear();
+        return false;
+    };
+
+    match decoded {
+        Protocol::Call { function, args, .. } => {
+            let Ok(function_index) = function.function_index.try_into() else {
+                stack.clear();
+                return false;
             };
-        };
-        //class.write_packet(data).await?;
+
+            for arg in args {
+                if stack.push(arg).is_err() {
+                    stack.clear();
+                    return false;
+                }
+            }
+
+            let result = program.call(function.machine_index, function_index, stack);
+            stack.clear();
+            result.is_ok()
+        }
+        _ => false,
     }
 }

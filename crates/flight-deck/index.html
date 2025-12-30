@@ -25,13 +25,9 @@
     </div>
     <div id="status" role="alert"></div>
     <script type="module">
-        import {consumeQueue, initDeck, connect} from "./deck.js";
+        import {consumeQueue, initDeck} from "./deck.js";
         (async () => {
-            console.log("new deck");
-            const deck = await initDeck();
-            console.log("calling function");
-            deck.call(0, 1, [13, 17, 177]);
-            console.log("consuming queue");
+            await initDeck();
             await consumeQueue();
         })();
     </script>

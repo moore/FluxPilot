@@ -9,6 +9,7 @@ use postcard::{from_bytes_cobs, to_vec_cobs};
 
 extern crate std;
 use std::println;
+use std::vec;
 
 use heapless::Vec;
 

@@ -1,3 +1,4 @@
+#![no_std]
 pub mod meme_storage;
 pub mod protocol;
 

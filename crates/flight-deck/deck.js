@@ -7,13 +7,14 @@ const connectBtn = document.getElementById('connect');
 const colorBtns = ['red','green','blue','rainbow'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
+let deck = null;
 
 export async function initDeck() {
     console.log("initDeck");
     await init();
     globalThis[SEND_QUEUE_KEY] ??= new AsyncQueue();
     console.log("queue inited", globalThis[SEND_QUEUE_KEY]);
-    let deck = new FlightDeck();
+    deck = new FlightDeck();
     return deck;
 }
 
@@ -28,6 +29,7 @@ export async function consumeQueue() {
         console.log("consume loop");
         let message = await globalThis[SEND_QUEUE_KEY].dequeue();
         console.log("got message", message);
+        await sendMessage(message);
     }
 } 
 
@@ -109,16 +111,15 @@ export async function connect() {
     }
 }
 
-async function sendChar(c) {
+async function sendMessage(message) {
     if (!writer) { setStatus('Device not connected.'); return; }
     try {
-        const data = new TextEncoder().encode(c);
         if (writer.type === 'serial') {
-            await writer.port.write(data);
+            await writer.port.write(message);
         } else if (writer.type === 'usb') {
-            await writer.device.transferOut(2, data);
+            await writer.device.transferOut(2, message);
         }
-        setStatus(`Sent: ${c}`);
+        setStatus(`Sent ${message.length} bytes`);
     } catch (err) {
         console.error('Write error:', err);
         setStatus('Send failed: ' + (err.message || err));
@@ -128,7 +129,21 @@ async function sendChar(c) {
 
 connectBtn.addEventListener('click', connect);
 
-['r','g','b','c'].forEach((cmd,i) => colorBtns[i].addEventListener('click', () => sendChar(cmd)));
+const colorCalls = [
+    { r: 255, g: 0, b: 0 },
+    { r: 0, g: 255, b: 0 },
+    { r: 0, g: 0, b: 255 },
+    { r: 255, g: 255, b: 0 },
+];
+
+colorCalls.forEach((color, i) => colorBtns[i].addEventListener('click', () => {
+    if (!deck) {
+        setStatus('Deck not initialized yet.');
+        return;
+    }
+    console.log("calling function:", 0, 0, [color.r, color.g, color.b]);
+    deck.call(0, 0, [color.r, color.g, color.b]);
+}));
 
 // Initial check
 if (!('serial' in navigator) && !('usb' in navigator)) {
