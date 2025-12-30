@@ -1,8 +1,8 @@
 use wasm_bindgen::prelude::*;
 
-use pliot::protocol::{Controler, FunctionId, Protocol};
+use pliot::protocol::{self, Controler, FunctionId, Protocol};
 
-use light_machine::{ProgramDescriptor, builder::*};
+use light_machine::{ProgramDescriptor, Word, builder::*};
 use postcard::{from_bytes_cobs, to_vec_cobs};
 
 use heapless::Vec;
@@ -12,14 +12,82 @@ const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
+
+#[wasm_bindgen]
+pub enum FlightDeckError {
+    ToManyArguments
+}
 #[wasm_bindgen]
 extern "C" {
     pub fn alert(s: &str);
 }
 
+#[wasm_bindgen(module = "/deck.js")]
+extern "C" {
+    pub fn send(bytes: &[u8]);
+}
+
+
 #[wasm_bindgen]
-pub fn greet(name: &str) {
-    alert(&format!("Hello, {}!", name));
+pub fn greet(name: &str) -> String {
+    let mut buffer = [0u16; 30];
+    let discriptor = get_test_program(&mut buffer);
+    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
+
+    let program = &buffer[0..discriptor.length];
+    let loader = controler.get_program_loader(program);
+
+    let mut out_buf = vec![0u8; 1024];
+
+    for message in loader {
+        let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
+        let bytes = in_buf.as_slice();
+        send(bytes);
+    }
+
+    format!("Hello, {:?}!", discriptor)
+}
+
+#[wasm_bindgen]
+pub struct FlightDeck {
+    controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>,
+}
+
+#[wasm_bindgen]
+impl FlightDeck {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> FlightDeck {
+        FlightDeck {
+            controler: Controler::new(),
+        }
+    }
+
+    pub fn call(&mut self, machine_index: Word, function_index: u32, args: &[Word]) -> Result<(), FlightDeckError> {
+        if args.len() > MAX_ARGS {
+            return Err(FlightDeckError::ToManyArguments);
+        }
+
+        let mut call_args = Vec::<Word, MAX_ARGS>::new();
+
+        for arg in args {
+           if call_args.push(*arg).is_err() {
+            unreachable!("The check abouve makes this unreachable");
+           }
+        }
+
+        let function = FunctionId {
+            machine_index,
+            function_index,
+        };
+
+        let message = self.controler.call(function, call_args);
+
+        let message_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
+        let bytes = message_buf.as_slice();
+        send(bytes);
+
+        Ok(())
+    }
 }
 
 fn get_test_program(buffer: &mut [u16]) -> ProgramDescriptor<1, 2> {

@@ -95,7 +95,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let store_function_index = descriptor.machines[0].functions[0].clone();
         let function = FunctionId {
             machine_index: 0,
-            funtion_index: store_function_index.into(),
+            function_index: store_function_index.into(),
         };
 
         let message = controler.call(function, args);
@@ -134,7 +134,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let get_function_index = descriptor.machines[0].functions[1].clone();
         let function = FunctionId {
             machine_index: 0,
-            funtion_index: get_function_index.into(),
+            function_index: get_function_index.into(),
         };
 
         println!("function id {:?}", &function);

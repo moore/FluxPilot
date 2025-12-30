@@ -2,15 +2,38 @@
 <html lang="en-US">
   <head>
     <meta charset="utf-8" />
-    <title>hello-wasm example</title>
+    <title>Flight Deck</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f5f5; }
+        .buttons { display: flex; flex-wrap: wrap; gap: 1rem; width: 100%; max-width: 600px; margin-top: 1rem; }
+        button { flex: 1 1 calc(50% - 1rem); padding: 1rem; font-size: 1.25rem; border: none; border-radius: 8px; color: white; cursor: pointer; }
+        #red { background: red; } #green { background: green; } #blue { background: blue; }
+        #rainbow { background: linear-gradient(45deg, red, orange, yellow, green, blue, indigo, violet); }
+        #connect { padding: 0.25rem 0.5rem; font-size: 0.9rem; max-width: 120px; flex: none; border-radius: 6px; background: #333; color: white; }
+        #status { margin-top: 1rem; color: #b00; text-align: center; max-width: 90%; white-space: pre-wrap; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
   </head>
   <body>
+    
+    <button id="connect">Connect Device</button>
+    <div class="buttons">
+        <button id="red" disabled>Red</button>
+        <button id="green" disabled>Green</button>
+        <button id="blue" disabled>Blue</button>
+        <button id="rainbow" disabled>Rainbow</button>
+    </div>
+    <div id="status" role="alert"></div>
     <script type="module">
-      import init, { greet } from "./pkg/flight_deck.js";
-
-      init().then(() => {
-        greet("WebAssembly");
-      });
+        import {consumeQueue, initDeck, connect} from "./deck.js";
+        (async () => {
+            console.log("new deck");
+            const deck = await initDeck();
+            console.log("calling function");
+            deck.call(0, 1, [13, 17, 177]);
+            console.log("consuming queue");
+            await consumeQueue();
+        })();
     </script>
   </body>
 </html>

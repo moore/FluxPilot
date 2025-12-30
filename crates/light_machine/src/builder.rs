@@ -14,7 +14,7 @@ pub enum MachineBuilderError {
 pub struct DataIndex(Word);
 
 /// Index for function.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FunctionIndex(Word);
 
 impl FunctionIndex {

@@ -118,6 +118,7 @@ pub const MACHINE_FUNCTIONS_OFFSET: usize = 2;
 const INIT_OFFSET: usize = 0;
 const GET_COLOR_OFFSET: usize = INIT_OFFSET + 1;
 
+#[derive(Debug)]
 pub struct MachineDescriptor<const FUNCTION_COUNT_MAX: usize> {
     pub functions: Vec<FunctionIndex, FUNCTION_COUNT_MAX>,
 }
@@ -134,6 +135,7 @@ impl<const FUNCTION_COUNT_MAX: usize> MachineDescriptor<FUNCTION_COUNT_MAX> {
     }
 }
 
+#[derive(Debug)]
 pub struct ProgramDescriptor<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     pub length: usize,
     pub machines: Vec<MachineDescriptor<FUNCTION_COUNT_MAX>, MACHINE_COUNT_MAX>,

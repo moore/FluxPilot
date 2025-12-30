@@ -19,7 +19,7 @@ pub struct MachineId(u32);
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FunctionId {
     pub machine_index: Word,
-    pub funtion_index: u32,
+    pub function_index: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

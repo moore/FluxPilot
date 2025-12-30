@@ -94,7 +94,7 @@ impl<
                 function,
                 args,
             } => {
-                let Ok(function_index) = function.funtion_index.try_into() else {
+                let Ok(function_index) = function.function_index.try_into() else {
                     return Err(PliotError::FunctionIndexOutOfRange);
                 };
 
