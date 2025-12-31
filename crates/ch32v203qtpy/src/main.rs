@@ -30,7 +30,7 @@ use light_machine::{
     builder::{MachineBuilderError, Op, ProgramBuilder},
     Program, Word,
 };
-use pliot::protocol::Protocol;
+use pliot::{Pliot, protocol::{Protocol, FunctionId}, meme_storage::MemStorage};
 use postcard::from_bytes_cobs;
 
 use heapless::Vec;
@@ -107,13 +107,11 @@ async fn main(_spawner: Spawner) {
 
     /////////////////////////////////////////////////
 
-    let mut buffer = [0u16; 100];
-    get_program(&mut buffer).expect("could not get program");
+    let mut program_buffer = [0u16; 100];
+    get_program(&mut program_buffer).expect("could not get program");
     let mut globals = [0u16; 10];
     let mut stack: Vec<Word, 100> = Vec::new();
-    let mut program =
-        Program::new(buffer.as_slice(), globals.as_mut_slice()).expect("clould not init program");
-
+    
     let sender = CHANNEL.sender();
 
     // Do stuff with the class!
@@ -140,19 +138,29 @@ async fn main(_spawner: Spawner) {
     const NUM_LEDS: usize = 25;
     let mut data = [RGB8::default(); NUM_LEDS];
 
+    let mut storage = MemStorage::new(program_buffer.as_mut_slice());
+
+
+    let memory = globals.as_mut_slice();
+    let mut pliot =
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(&mut storage, memory);
+
     let led_loop = async {
         let mut use_program = false;
         loop {
             for j in 0..(256 * 5) {
                 while let Ok(mut message) = CHANNEL.try_receive() {
-                    if handle_message(message.as_mut_slice(), &mut program, &mut stack) {
-                        use_program = true;
-                    }
+                    let mut out_buf = [0u8; 64]; // BUG 64 is made up
+                    let wrote = pliot
+                        .process_message(&mut stack, message.as_mut_slice(), out_buf.as_mut_slice())
+                        .expect("Call had error");
+
+                    use_program = true;
                 }
                 for i in 0..NUM_LEDS {
                     if use_program {
                         if let Ok((red, green, blue)) =
-                            program.get_led_color(0, i as u16, &mut stack)
+                            pliot.get_led_color(0, i as u16, &mut stack)
                         {
                             data[i] = (red, green, blue).into();
                             stack.clear();

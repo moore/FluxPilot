@@ -1,9 +1,9 @@
 use wasm_bindgen::prelude::*;
 
-use pliot::protocol::{self, Controler, FunctionId, Protocol};
+use pliot::protocol::{Controler, FunctionId, Protocol};
 
 use light_machine::{ProgramDescriptor, Word, builder::*};
-use postcard::{from_bytes_cobs, to_vec_cobs};
+use postcard::{to_vec_cobs};
 
 use heapless::Vec;
 
@@ -27,7 +27,7 @@ extern "C" {
     pub fn send(bytes: &[u8]);
 }
 
-
+/* 
 #[wasm_bindgen]
 pub fn greet(name: &str) -> String {
     let mut buffer = [0u16; 30];
@@ -47,6 +47,7 @@ pub fn greet(name: &str) -> String {
 
     format!("Hello, {:?}!", discriptor)
 }
+*/
 
 #[wasm_bindgen]
 pub struct FlightDeck {

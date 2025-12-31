@@ -5,7 +5,7 @@ pub mod protocol;
 use heapless::Vec;
 use light_machine::{MachineError, Program, Word};
 use postcard::from_bytes_cobs;
-use protocol::Protocol;
+use protocol::{Protocol, FunctionId};
 use thiserror_no_std::Error;
 
 use crate::protocol::RequestId;
@@ -95,26 +95,8 @@ impl<
                 function,
                 args,
             } => {
-                let Ok(function_index) = function.function_index.try_into() else {
-                    return Err(PliotError::FunctionIndexOutOfRange);
-                };
-
-                for arg in args {
-                    if stack.push(arg).is_err() {
-                        Err(MachineError::StackOverflow)?;
-                    }
-                }
-                let progroam_unmber = ProgramNumber(0);
-                let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
-
-                program.call(function.machine_index, function_index, stack)?;
-
-                if stack.len() > MAX_RESULT {
-                    return Err(PliotError::ResultTooLarge);
-                }
-
-                let results: Vec<u16, MAX_RESULT> = stack.into_iter().map(|i| *i).collect();
-
+                let results = self.call(stack, function, args)?;
+                
                 let result = Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>::Return {
                     request_id,
                     result: results,
@@ -208,6 +190,43 @@ impl<
         };
 
         Ok(sent_len)
+    }
+
+
+    pub fn call<const STACK_SIZE: usize>(&mut self, stack: &mut Vec<Word, STACK_SIZE>, function: FunctionId, args: Vec<Word, MAX_ARGS>) -> Result<Vec<Word, MAX_RESULT>, PliotError> {
+        let Ok(function_index) = function.function_index.try_into() else {
+            return Err(PliotError::FunctionIndexOutOfRange);
+        };
+
+        for arg in args {
+            if stack.push(arg).is_err() {
+                Err(MachineError::StackOverflow)?;
+            }
+        }
+        let progroam_unmber = ProgramNumber(0);
+        let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
+
+        program.call(function.machine_index, function_index, stack)?;
+
+        if stack.len() > MAX_RESULT {
+            return Err(PliotError::ResultTooLarge);
+        }
+
+        let results: Vec<Word, MAX_RESULT> = stack.into_iter().map(|i| *i).collect();
+
+       Ok(results)
+    }
+
+   pub fn get_led_color<const STACK_SIZE: usize>(
+        &mut self,
+        machine_number: Word,
+        index: u16,
+        stack: &mut Vec<Word, STACK_SIZE>,
+    ) -> Result<(u8, u8, u8), PliotError> {
+        let progroam_unmber = ProgramNumber(0);
+        let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
+        let result = program.get_led_color(machine_number, index, stack)?;
+        Ok(result)
     }
 
     fn wrire_unexpected_message_type(
