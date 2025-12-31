@@ -8,11 +8,11 @@ use hal::prelude::*;
 use hal::spi::Spi;
 
 use embassy_executor::Spawner;
-use embassy_futures::join::join3;
+use embassy_futures::join::join4;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::{Channel, Sender};
+use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::Timer;
-use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
+use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver as UsbReceiver, Sender as UsbSender, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
 
@@ -43,10 +43,17 @@ const MAX_ARGS: usize = 3;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
 const INCOMING_MESSAGE_CAP: usize = 128;
+const OUTGOING_MESSAGE_CAP: usize = 128;
+const OUTGOING_QUEUE_DEPTH: usize = 1;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 
 static CHANNEL: Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1> = Channel::new();
+static OUTGOING_CHANNEL: Channel<
+    CriticalSectionRawMutex,
+    Vec<u8, OUTGOING_MESSAGE_CAP>,
+    OUTGOING_QUEUE_DEPTH,
+> = Channel::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -97,7 +104,7 @@ async fn main(_spawner: Spawner) {
     );
 
     // Create classes on the builder.
-    let mut class = CdcAcmClass::new(&mut builder, &mut state, 64);
+    let class = CdcAcmClass::new(&mut builder, &mut state, 64);
 
     // Build the builder.
     let mut usb = builder.build();
@@ -113,12 +120,22 @@ async fn main(_spawner: Spawner) {
     let mut stack: Vec<Word, 100> = Vec::new();
     
     let sender = CHANNEL.sender();
+    let outgoing_sender = OUTGOING_CHANNEL.sender();
+    let outgoing_receiver = OUTGOING_CHANNEL.receiver();
 
-    // Do stuff with the class!
-    let echo_fut = async {
+    let (mut usb_sender, mut usb_receiver) = class.split();
+
+    let usb_rx_fut = async {
         loop {
-            class.wait_connection().await;
-            let _ = usb_receiver(&mut class, sender).await;
+            usb_receiver.wait_connection().await;
+            let _ = usb_receiver_loop(&mut usb_receiver, &sender).await;
+        }
+    };
+
+    let usb_tx_fut = async {
+        loop {
+            usb_sender.wait_connection().await;
+            let _ = usb_sender_loop(&mut usb_sender, &outgoing_receiver).await;
         }
     };
 
@@ -150,10 +167,17 @@ async fn main(_spawner: Spawner) {
         loop {
             for j in 0..(256 * 5) {
                 while let Ok(mut message) = CHANNEL.try_receive() {
-                    let mut out_buf = [0u8; 64]; // BUG 64 is made up
+                    let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
                     let wrote = pliot
                         .process_message(&mut stack, message.as_mut_slice(), out_buf.as_mut_slice())
                         .expect("Call had error");
+
+                    if wrote > 0 {
+                        let mut response: Vec<u8, OUTGOING_MESSAGE_CAP> = Vec::new();
+                        if response.extend_from_slice(&out_buf[..wrote]).is_ok() {
+                            let _ = outgoing_sender.try_send(response);
+                        }
+                    }
 
                     use_program = true;
                 }
@@ -179,7 +203,7 @@ async fn main(_spawner: Spawner) {
 
     // Run everything concurrently.
     // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join3(usb_fut, echo_fut, led_loop).await;
+    join4(usb_fut, usb_rx_fut, usb_tx_fut, led_loop).await;
 }
 
 fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
@@ -237,14 +261,14 @@ impl From<EndpointError> for Disconnected {
     }
 }
 
-async fn usb_receiver<'d, T: Instance + 'd>(
-    class: &mut CdcAcmClass<'d, Driver<'d, T>>,
-    tx: Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
+async fn usb_receiver_loop<'d, T: Instance + 'd>(
+    receiver: &mut UsbReceiver<'d, Driver<'d, T>>,
+    incoming: &Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
 ) -> Result<(), Disconnected> {
     let mut buf = [0; 64];
     let mut frame: Vec<u8, INCOMING_MESSAGE_CAP> = Vec::new();
     loop {
-        let n = class.read_packet(&mut buf).await?;
+        let n = receiver.read_packet(&mut buf).await?;
         let data = &buf[..n];
         for &byte in data {
             if frame.push(byte).is_err() {
@@ -257,9 +281,24 @@ async fn usb_receiver<'d, T: Instance + 'd>(
             if byte == 0 {
                 let message = frame.clone();
                 frame.clear();
-                let _ = tx.try_send(message);
+                let _ = incoming.try_send(message);
             }
         }
+    }
+}
+
+async fn usb_sender_loop<'d, T: Instance + 'd>(
+    sender: &mut UsbSender<'d, Driver<'d, T>>,
+    outgoing: &Receiver<
+        'static,
+        CriticalSectionRawMutex,
+        Vec<u8, OUTGOING_MESSAGE_CAP>,
+        OUTGOING_QUEUE_DEPTH,
+    >,
+) -> Result<(), Disconnected> {
+    loop {
+        let message = outgoing.receive().await;
+        sender.write_packet(message.as_slice()).await?;
     }
 }
 

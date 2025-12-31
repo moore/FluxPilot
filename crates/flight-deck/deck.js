@@ -7,31 +7,36 @@ const connectBtn = document.getElementById('connect');
 const colorBtns = ['red','green','blue','rainbow'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
+const RECEIVE_QUEUE_KEY = "__receivedQueue__";
 let deck = null;
+let usbReadActive = false;
 
 export async function initDeck() {
-    console.log("initDeck");
     await init();
     globalThis[SEND_QUEUE_KEY] ??= new AsyncQueue();
-    console.log("queue inited", globalThis[SEND_QUEUE_KEY]);
+    globalThis[RECEIVE_QUEUE_KEY] ??= new AsyncQueue();
     deck = new FlightDeck();
     return deck;
 }
 
 export function send(message) {
-    console.log("enqueue message", globalThis[SEND_QUEUE_KEY]);
     globalThis[SEND_QUEUE_KEY].enqueue(message);
 }
 
 
 export async function consumeQueue() {
     while (true) {
-        console.log("consume loop");
         let message = await globalThis[SEND_QUEUE_KEY].dequeue();
-        console.log("got message", message);
         await sendMessage(message);
     }
 } 
+
+export async function consumeIncomingQueue() {
+    while (true) {
+        let message = await globalThis[RECEIVE_QUEUE_KEY].dequeue();
+        console.log("usb message", message);
+    }
+}
 
 function setStatus(msg) {
     statusEl.textContent = msg;
@@ -43,7 +48,7 @@ function enableControls() {
 
 export async function connect() {
     setStatus('');
-    
+    console.log("in my connect");
     // Try Web Serial first, fallback to WebUSB if not available
     if (false && 'serial' in navigator) {
         try {
@@ -65,34 +70,38 @@ export async function connect() {
         return;
     }
     try {
-    // WCH CH32V203 and common USB chip vendor IDs
-    const filters = [
-        { vendorId: 0xc0de },
-        { vendorId: 0x1A86 }, // WinChipHead (WCH) - CH32V203, CH340/CH341
-        { vendorId: 0x4348 }, // WCH alternative vendor ID
-        { vendorId: 0x10C4 }, // Silicon Labs CP210x
-        { vendorId: 0x0403 }, // FTDI
-        { vendorId: 0x067B }, // Prolific PL2303
-        { vendorId: 0x2341 }, // Arduino
-        { vendorId: 0x239A }, // Adafruit
-        { vendorId: 0x1209 }, // Generic
-    ];
-    
-    const device = await navigator.usb.requestDevice({ filters });
-    await device.open();
-    
-    // Try to select the first available configuration
-    if (device.configuration === null) {
-        await device.selectConfiguration(1);
-    }
-    
-    // Find and claim the first available interface
-    const interfaces = device.configuration.interfaces;
-    if (interfaces.length === 0) {
-        throw new Error('No interfaces available');
-    }
+        // WCH CH32V203 and common USB chip vendor IDs
+        const filters = [
+            { vendorId: 0xc0de },
+            { vendorId: 0x1A86 }, // WinChipHead (WCH) - CH32V203, CH340/CH341
+            { vendorId: 0x4348 }, // WCH alternative vendor ID
+            { vendorId: 0x10C4 }, // Silicon Labs CP210x
+            { vendorId: 0x0403 }, // FTDI
+            { vendorId: 0x067B }, // Prolific PL2303
+            { vendorId: 0x2341 }, // Arduino
+            { vendorId: 0x239A }, // Adafruit
+            { vendorId: 0x1209 }, // Generic
+        ];
+        
+        const device = await navigator.usb.requestDevice({ filters });
+        await device.open();
+        
+        // Try to select the first available configuration
+        if (device.configuration === null) {
+            await device.selectConfiguration(1);
+        }
+        
+        const ifaceInfo = findUsbInterface(device);
+        if (!ifaceInfo) {
+            throw new Error('No suitable USB interface with bulk IN/OUT endpoints');
+        }
+        const { interfaceNumber, alternateSetting, inEndpoint, outEndpoint } = ifaceInfo;
 
-    await device.claimInterface(1);
+        await device.claimInterface(interfaceNumber);
+        if (alternateSetting !== 0) {
+            await device.selectAlternateInterface(interfaceNumber, alternateSetting);
+        }
+        console.log("did claime interface", device);
         /*
         // Try to claim interface, handling if it's already claimed
         try {
@@ -102,7 +111,8 @@ export async function connect() {
             // Fallback to interface 1 if the first interface fails
             await device.claimInterface(1);
         }*/
-        writer = { device, type: 'usb' };
+        writer = { device, type: 'usb', inEndpoint, outEndpoint };
+        startUsbReceiveLoop(device);
         enableControls();
         setStatus('Connected via WebUSB. Tap a color.');
     } catch (err) {
@@ -117,7 +127,7 @@ async function sendMessage(message) {
         if (writer.type === 'serial') {
             await writer.port.write(message);
         } else if (writer.type === 'usb') {
-            await writer.device.transferOut(2, message);
+            await writer.device.transferOut(writer.outEndpoint, message);
         }
         setStatus(`Sent ${message.length} bytes`);
     } catch (err) {
@@ -126,6 +136,58 @@ async function sendMessage(message) {
     }
 }
 
+function findUsbInterface(device) {
+    if (!device.configuration) {
+        return null;
+    }
+    for (const iface of device.configuration.interfaces) {
+        for (const alt of iface.alternates) {
+            const inEp = alt.endpoints.find(
+                (ep) => ep.direction === 'in' && ep.type === 'bulk'
+            );
+            const outEp = alt.endpoints.find(
+                (ep) => ep.direction === 'out' && ep.type === 'bulk'
+            );
+            if (inEp && outEp) {
+                return {
+                    interfaceNumber: iface.interfaceNumber,
+                    alternateSetting: alt.alternateSetting,
+                    inEndpoint: inEp.endpointNumber,
+                    outEndpoint: outEp.endpointNumber,
+                };
+            }
+        }
+    }
+    return null;
+}
+
+async function startUsbReceiveLoop(device) {
+    if (usbReadActive) {
+        return;
+    }
+    usbReadActive = true;
+    while (writer && writer.type === 'usb' && writer.device === device) {
+        try {
+            const result = await device.transferIn(writer.inEndpoint, 64);
+            console.log("did transfer in", result);
+            if (result.status === 'ok' && result.data) {
+                const data = new Uint8Array(
+                    result.data.buffer,
+                    result.data.byteOffset,
+                    result.data.byteLength
+                );
+                const copy = new Uint8Array(data);
+                globalThis[RECEIVE_QUEUE_KEY].enqueue(copy);
+            } else {
+                console.warn('USB read status:', result.status);
+            }
+        } catch (err) {
+            console.error('USB read error:', err);
+            break;
+        }
+    }
+    usbReadActive = false;
+}
 
 connectBtn.addEventListener('click', connect);
 

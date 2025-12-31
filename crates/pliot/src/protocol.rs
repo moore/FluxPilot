@@ -11,6 +11,10 @@ impl RequestId {
     pub fn new(id: u64) -> Self {
         Self(id)
     }
+
+    pub fn value(&self) -> u64 {
+        self.0
+    }
 }
 
 #[derive(Serialize, Deserialize)]

@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use pliot::protocol::{Controler, FunctionId, Protocol};
+use pliot::protocol::{Controler, FunctionId, Protocol, RequestId};
 
 use light_machine::{ProgramDescriptor, Word, builder::*};
 use postcard::{to_vec_cobs};
@@ -27,32 +27,20 @@ extern "C" {
     pub fn send(bytes: &[u8]);
 }
 
-/* 
+
 #[wasm_bindgen]
-pub fn greet(name: &str) -> String {
-    let mut buffer = [0u16; 30];
-    let discriptor = get_test_program(&mut buffer);
-    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
+pub struct WasmRequestId(u64);
 
-    let program = &buffer[0..discriptor.length];
-    let loader = controler.get_program_loader(program);
-
-    let mut out_buf = vec![0u8; 1024];
-
-    for message in loader {
-        let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
-        let bytes = in_buf.as_slice();
-        send(bytes);
-    }
-
-    format!("Hello, {:?}!", discriptor)
+impl From<RequestId> for WasmRequestId {
+    fn from(id: RequestId) -> Self { Self(id.value()) }
 }
-*/
 
 #[wasm_bindgen]
 pub struct FlightDeck {
     controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>,
 }
+
+
 
 #[wasm_bindgen]
 impl FlightDeck {
@@ -63,7 +51,7 @@ impl FlightDeck {
         }
     }
 
-    pub fn call(&mut self, machine_index: Word, function_index: u32, args: &[Word]) -> Result<(), FlightDeckError> {
+    pub fn call(&mut self, machine_index: Word, function_index: u32, args: &[Word]) -> Result<Option<WasmRequestId>, FlightDeckError> {
         if args.len() > MAX_ARGS {
             return Err(FlightDeckError::ToManyArguments);
         }
@@ -87,7 +75,9 @@ impl FlightDeck {
         let bytes = message_buf.as_slice();
         send(bytes);
 
-        Ok(())
+        let request_id = message.get_request_id();
+
+        Ok(request_id.map(Into::into))
     }
 }
 
