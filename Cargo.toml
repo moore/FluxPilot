@@ -24,5 +24,14 @@ default-features = false
 
 [profile.release]
 opt-level = "s"
-lto = true
-strip = false
+#lto = true
+#lto = false
+lto = "fat"
+#lto = "thin"
+codegen-units = 1
+debug = 0
+#strip = false
+strip = "symbols"      # nightly supports more; stable supports this in recent cargo
+panic = "abort"
+#overflow-checks = false
+incremental = false

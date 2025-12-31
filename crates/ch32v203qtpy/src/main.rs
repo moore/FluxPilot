@@ -34,6 +34,7 @@ use pliot::{Pliot, protocol::{Protocol, FunctionId}, meme_storage::MemStorage};
 use postcard::from_bytes_cobs;
 
 use heapless::Vec;
+use static_cell::StaticCell;
 
 bind_interrupts!(struct Irqs {
     USB_LP_CAN1_RX0 => ch32_hal::usbd::InterruptHandler<peripherals::USBD>;
@@ -48,12 +49,22 @@ const OUTGOING_QUEUE_DEPTH: usize = 1;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 
+static CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>> = StaticCell::new();
+static OUTGOING_CHANNEL: StaticCell<Channel<
+    CriticalSectionRawMutex,
+    Vec<u8, OUTGOING_MESSAGE_CAP>,
+    OUTGOING_QUEUE_DEPTH,
+>> = StaticCell::new();
+/* 
 static CHANNEL: Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1> = Channel::new();
 static OUTGOING_CHANNEL: Channel<
     CriticalSectionRawMutex,
     Vec<u8, OUTGOING_MESSAGE_CAP>,
     OUTGOING_QUEUE_DEPTH,
 > = Channel::new();
+*/
+static USB_RECEIVE_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+static VM_STACK: StaticCell<Vec<Word, 100>> = StaticCell::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -62,7 +73,7 @@ async fn main(_spawner: Spawner) {
     config.rcc = hal::rcc::Config::SYSCLK_FREQ_144MHZ_HSI;
     let p = hal::init(config);
 
-    let usb: peripherals::USBD = p.USBD;
+    let usb = p.USBD;
 
     /* USB DRIVER SECION */
     let driver = Driver::new(usb, Irqs, p.PA12, p.PA11);
@@ -117,11 +128,12 @@ async fn main(_spawner: Spawner) {
     let mut program_buffer = [0u16; 100];
     get_program(&mut program_buffer).expect("could not get program");
     let mut globals = [0u16; 10];
-    let mut stack: Vec<Word, 100> = Vec::new();
-    
-    let sender = CHANNEL.sender();
-    let outgoing_sender = OUTGOING_CHANNEL.sender();
-    let outgoing_receiver = OUTGOING_CHANNEL.receiver();
+    let stack = VM_STACK.init(Vec::new());
+    let channel = CHANNEL.init(Channel::new());
+    let sender = channel.sender();
+    let outgoing_channel = OUTGOING_CHANNEL.init(Channel::new());
+    let outgoing_sender = outgoing_channel.sender();
+    let outgoing_receiver = outgoing_channel.receiver();
 
     let (mut usb_sender, mut usb_receiver) = class.split();
 
@@ -166,10 +178,10 @@ async fn main(_spawner: Spawner) {
         let mut use_program = false;
         loop {
             for j in 0..(256 * 5) {
-                while let Ok(mut message) = CHANNEL.try_receive() {
+                while let Ok(mut message) = channel.try_receive() {
                     let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
                     let wrote = pliot
-                        .process_message(&mut stack, message.as_mut_slice(), out_buf.as_mut_slice())
+                        .process_message(stack, message.as_mut_slice(), out_buf.as_mut_slice())
                         .expect("Call had error");
 
                     if wrote > 0 {
@@ -184,7 +196,7 @@ async fn main(_spawner: Spawner) {
                 for i in 0..NUM_LEDS {
                     if use_program {
                         if let Ok((red, green, blue)) =
-                            pliot.get_led_color(0, i as u16, &mut stack)
+                            pliot.get_led_color(0, i as u16, stack)
                         {
                             data[i] = (red, green, blue).into();
                             stack.clear();
@@ -265,10 +277,10 @@ async fn usb_receiver_loop<'d, T: Instance + 'd>(
     receiver: &mut UsbReceiver<'d, Driver<'d, T>>,
     incoming: &Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
 ) -> Result<(), Disconnected> {
-    let mut buf = [0; 64];
+    let mut buf = USB_RECEIVE_BUF.init([0u8; 64]);
     let mut frame: Vec<u8, INCOMING_MESSAGE_CAP> = Vec::new();
     loop {
-        let n = receiver.read_packet(&mut buf).await?;
+        let n = receiver.read_packet(buf).await?;
         let data = &buf[..n];
         for &byte in data {
             if frame.push(byte).is_err() {

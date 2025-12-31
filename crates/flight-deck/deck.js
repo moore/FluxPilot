@@ -177,6 +177,7 @@ async function startUsbReceiveLoop(device) {
                     result.data.byteLength
                 );
                 const copy = new Uint8Array(data);
+                console.log("enqueueing data", copy);
                 globalThis[RECEIVE_QUEUE_KEY].enqueue(copy);
             } else {
                 console.warn('USB read status:', result.status);

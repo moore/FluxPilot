@@ -3,6 +3,8 @@ target = "riscv32imc-unknown-none-elf"
 
 [target."riscv32imc-unknown-none-elf"]
 rustflags = [
+    "-C", "link-arg=--gc-sections",
+    "-C", "link-arg=-Map=link.map"
 #  "-C", "link-arg=-Tlink.x",
 ]
 # runner = "riscv64-unknown-elf-gdb -q -x openocd.gdb"
