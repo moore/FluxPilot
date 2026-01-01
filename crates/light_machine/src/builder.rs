@@ -64,14 +64,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             return Err(MachineBuilderError::BufferTooSmall);
         }
 
-        let Some(machine_count_slot) = buffer.get_mut(MACHINE_COUNT_OFFSET) else {
-            return Err(MachineBuilderError::BufferTooSmall);
-        };
-        *machine_count_slot = 0; // Machine count
-        let Some(globals_slot) = buffer.get_mut(GLOBALS_SIZE_OFFSET) else {
-            return Err(MachineBuilderError::BufferTooSmall);
-        };
-        *globals_slot = 0; // Globals size
+        set_value(buffer, MACHINE_COUNT_OFFSET, 0, MachineBuilderError::BufferTooSmall)?; // Machine count
+        set_value(buffer, GLOBALS_SIZE_OFFSET, 0, MachineBuilderError::BufferTooSmall)?; // Globals size
         let Some(free) = machine_count.checked_add(2) else {
             return Err(MachineBuilderError::MachineCountOverflowsWord(
                 machine_count as usize,
@@ -96,19 +90,23 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
                 self.next_machine_builder as usize,
             ));
         };
-        let Some(machine_count_slot) = self.buffer.get_mut(MACHINE_COUNT_OFFSET) else {
-            return Err(MachineBuilderError::BufferTooSmall);
-        };
-        *machine_count_slot = next_machine_builder;
+        set_value(
+            self.buffer,
+            MACHINE_COUNT_OFFSET,
+            next_machine_builder,
+            MachineBuilderError::BufferTooSmall,
+        )?;
         let Some(machine_table_index) = (self.next_machine_builder as usize)
             .checked_add(MACHINE_TABLE_OFFSET)
         else {
             return Err(MachineBuilderError::BufferTooSmall);
         };
-        let Some(machine_table_slot) = self.buffer.get_mut(machine_table_index) else {
-            return Err(MachineBuilderError::BufferTooSmall);
-        };
-        *machine_table_slot = self.free as Word;
+        set_value(
+            self.buffer,
+            machine_table_index,
+            self.free as Word,
+            MachineBuilderError::BufferTooSmall,
+        )?;
         let globals_offset = *self
             .buffer
             .get(GLOBALS_SIZE_OFFSET)
@@ -134,10 +132,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
 
     fn add_word(&mut self, word: Word) -> Result<(), MachineBuilderError> {
         let index = usize::from(self.free);
-        let Some(slot) = self.buffer.get_mut(index) else {
-            return Err(MachineBuilderError::BufferTooSmall);
-        };
-        *slot = word;
+        set_value(
+            self.buffer,
+            index,
+            word,
+            MachineBuilderError::BufferTooSmall,
+        )?;
         let Some(new_free) = self.free.checked_add(1) else {
             return Err(MachineBuilderError::BufferTooSmall);
         };
@@ -149,9 +149,11 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         if self.descriptor.add_machine(machine_descriptor).is_err() {
             return Err(MachineBuilderError::MachineCountExceeded);
         }
-        let Some(globals_slot) = self.buffer.get_mut(GLOBALS_SIZE_OFFSET) else {
-            return Err(MachineBuilderError::BufferTooSmall);
-        };
+        let globals_slot = get_mut_or(
+            self.buffer,
+            GLOBALS_SIZE_OFFSET,
+            MachineBuilderError::BufferTooSmall,
+        )?;
         let Some(new_globals_size) = globals_slot.checked_add(globals_size) else {
             return Err(MachineBuilderError::TooLarge(globals_size as usize));
         };
@@ -276,10 +278,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         let Some(index) = machine_offset.checked_add(usize::from(index.0)) else {
             return Err(MachineBuilderError::BufferTooSmall); // BUG: worng error
         };
-        let Some(slot) = self.program.buffer.get_mut(index) else {
-            return Err(MachineBuilderError::BufferTooSmall);
-        };
-        *slot = function_start;
+        set_value(
+            self.program.buffer,
+            index,
+            function_start,
+            MachineBuilderError::BufferTooSmall,
+        )?;
         Ok(())
     }
 }

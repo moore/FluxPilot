@@ -54,6 +54,15 @@ pub mod builder;
 /// stack to have a single type.
 pub type Word = u16;
 
+fn get_mut_or<'a, E>(slice: &'a mut [Word], index: usize, err: E) -> Result<&'a mut Word, E> {
+    slice.get_mut(index).ok_or(err)
+}
+
+fn set_value<E>(slice: &mut [Word], index: usize, value: Word, err: E) -> Result<(), E> {
+    *get_mut_or(slice, index, err)? = value;
+    Ok(())
+}
+
 #[repr(u16)] // Must match Word
 #[derive(VariantCount, Debug)]
 pub enum Ops {
@@ -365,10 +374,12 @@ impl<'a, 'b> Program<'a, 'b> {
                         return Err(MachineError::StackUnderFlow);
                     };
 
-                    let Some(slot) = self.globals.get_mut(index) else {
-                        return Err(MachineError::OutOfBoundsGlobalsAccess(index));
-                    };
-                    *slot = word;
+                    set_value(
+                        self.globals,
+                        index,
+                        word,
+                        MachineError::OutOfBoundsGlobalsAccess(index),
+                    )?;
                 }
                 Ops::LoadStatic => (),
                 Ops::Jump => (),
