@@ -56,12 +56,6 @@ extern "C" {
 }
 
 
-#[wasm_bindgen]
-pub struct WasmRequestId(u64);
-
-impl From<RequestId> for WasmRequestId {
-    fn from(id: RequestId) -> Self { Self(id.value()) }
-}
 
 #[wasm_bindgen]
 pub struct FlightDeck {
@@ -78,7 +72,7 @@ impl FlightDeck {
         }
     }
 
-    pub fn call(&mut self, machine_index: Word, function_index: u32, args: &[Word]) -> Result<Option<WasmRequestId>, FlightDeckError> {
+    pub fn call(&mut self, machine_index: Word, function_index: u32, args: &[Word]) -> Result<Option<u64>, FlightDeckError> {
         if args.len() > MAX_ARGS {
             return Err(FlightDeckError::ToManyArguments);
         }
@@ -102,9 +96,12 @@ impl FlightDeck {
         let bytes = message_buf.as_slice();
         send(bytes);
 
-        let request_id = message.get_request_id();
+        let request_id = match message.get_request_id() {
+            None => None,
+            Some(id) => Some(id.value())
+        };
 
-        Ok(request_id.map(Into::into))
+        Ok(request_id)
     }
 
     pub fn receive(

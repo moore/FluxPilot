@@ -212,7 +212,8 @@ colorCalls.forEach((color, i) => colorBtns[i].addEventListener('click', () => {
         return;
     }
     console.log("calling function:", 0, 0, [color.r, color.g, color.b]);
-    deck.call(0, 0, [color.r, color.g, color.b]);
+    const request_id = deck.call(0, 0, [color.r, color.g, color.b]);
+    console.log("request complete", request_id);
 }));
 
 // Initial check
