@@ -3,6 +3,25 @@
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::arithmetic_side_effects,
+        clippy::panicking_unwrap,
+        clippy::out_of_bounds_indexing,
+        clippy::panic_in_result_fn,
+        clippy::unwrap_in_result,
+    )
+)]
+#![cfg_attr(not(test), warn(clippy::missing_panics_doc))]
+
 use hal::peripherals;
 use hal::prelude::*;
 use hal::spi::Spi;
@@ -69,7 +88,7 @@ static USB_STATE: StaticCell<State> = StaticCell::new();
 static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     hal::debug::SDIPrint::enable();
     let mut config = hal::Config::default();
     config.rcc = hal::rcc::Config::SYSCLK_FREQ_144MHZ_HSI;
@@ -147,9 +166,11 @@ async fn main(_spawner: Spawner) {
 
     let data = LED_BUFFER.init([RGB8::default(); NUM_LEDS]);
 
-    _spawner.spawn(usb_device_task(usb)).unwrap();
-    _spawner.spawn(usb_rx_task(usb_receiver, sender)).unwrap();
-    _spawner.spawn(usb_tx_task(usb_sender, outgoing_receiver)).unwrap();
+    // BUG: we should check the values and log + restart
+    // If we cant't start these the device will not work.
+    let _ = spawner.spawn(usb_device_task(usb));
+    let _ = spawner.spawn(usb_rx_task(usb_receiver, sender));
+    let _ = spawner.spawn(usb_tx_task(usb_sender, outgoing_receiver));
     led_task(
             &mut ws,
             data,
@@ -202,7 +223,10 @@ async fn led_task(
     program_buffer: &'static mut [u16; 100],
     globals: &'static mut [u16; 10],
 ) {
-    get_program(program_buffer).expect("could not get program");
+    if get_program(program_buffer).is_err() {
+        // BUG: we should log here.
+        return;
+    }
     let mut storage = MemStorage::new(program_buffer.as_mut_slice());
 
     let memory = globals.as_mut_slice();
@@ -212,24 +236,41 @@ async fn led_task(
     let stack = VM_STACK.init(Vec::new());
     loop {
         
-        for i in 0..data.len() {
+        for (i, led) in data.iter_mut().enumerate() {
             if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, stack) {
-                data[i] = (red, green, blue).into();
+                *led = (red, green, blue).into();
                 stack.clear();
             }
         }
-        ws.write(brightness(data.iter().cloned(), 2)).unwrap();
+        // BUG: we need to log and error or update an error
+        // counter instead of silighently ignoring the error
+        let _ = ws.write(brightness(data.iter().cloned(), 2));
 
         if let Ok(mut message) = channel.try_receive() {
             let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
-            let wrote = pliot
-                .process_message(stack, message.as_mut_slice(), out_buf.as_mut_slice())
-                .expect("Call had error");
+            let wrote = match pliot.process_message(
+                stack,
+                message.as_mut_slice(),
+                out_buf.as_mut_slice(),
+            ) {
+                Ok(wrote) => wrote,
+                Err(_) => {
+                    // BUG: we should log error
+                    stack.clear();
+                    0
+                }
+            };
 
             if wrote > 0 {
                 let mut response: Vec<u8, OUTGOING_MESSAGE_CAP> = Vec::new();
-                if response.extend_from_slice(&out_buf[..wrote]).is_ok() {
-                    let _ = outgoing_sender.try_send(response);
+                if let Some(bytes) = out_buf.get(..wrote) {
+                    
+                    if response.extend_from_slice(bytes).is_ok() {
+                        let _ = outgoing_sender.try_send(response);
+                    }
+                } else {
+                    //BUG: this should be unreachable but we should log
+                    // to catch bugs introduced in refactoring.
                 }
             }
 
@@ -253,9 +294,7 @@ fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
     function.add_op(Op::Return)?;
     let (_function_index, machine) = function.finish()?;
 
-    let mut function = machine
-        .new_function()
-        .expect("could not get fucntion builder");
+    let mut function = machine.new_function()?;
     function.add_op(Op::Load(0))?;
     function.add_op(Op::Load(1))?;
     function.add_op(Op::Load(2))?;
@@ -267,27 +306,12 @@ fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
     Ok(())
 }
 
-/// Input a value 0 to 255 to get a color value
-/// The colours are a transition r - g - b - back to r.
-fn wheel(mut wheel_pos: u8) -> RGB8 {
-    wheel_pos = 255 - wheel_pos;
-    if wheel_pos < 85 {
-        return (255 - wheel_pos * 3, 0, wheel_pos * 3).into();
-    }
-    if wheel_pos < 170 {
-        wheel_pos -= 85;
-        return (0, wheel_pos * 3, 255 - wheel_pos * 3).into();
-    }
-    wheel_pos -= 170;
-    (wheel_pos * 3, 255 - wheel_pos * 3, 0).into()
-}
-
 struct Disconnected {}
 
 impl From<EndpointError> for Disconnected {
     fn from(val: EndpointError) -> Self {
         match val {
-            EndpointError::BufferOverflow => panic!("Buffer overflow"),
+            EndpointError::BufferOverflow => Disconnected {},
             EndpointError::Disabled => Disconnected {},
         }
     }
@@ -301,7 +325,11 @@ async fn usb_receiver_loop<'d, T: Instance + 'd>(
     let frame = RAW_MESSAGE_BUFF.init(Vec::new());
     loop {
         let n = receiver.read_packet(buf).await?;
-        let data = &buf[..n];
+        let Some(data) = buf.get(..n) else {
+            // This should be unreachable but we should probbly
+            // log something.
+            continue;  
+        };
         for &byte in data {
             if frame.push(byte).is_err() {
                 // TODO: Track overflow and discard bytes until the next 0 delimiter to avoid decoding a partial frame.
