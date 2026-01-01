@@ -27,9 +27,9 @@ impl FunctionIndex {
     }
 }
 
-impl Into<u32> for FunctionIndex {
-    fn into(self) -> u32 {
-        self.0 as u32
+impl From<FunctionIndex> for u32 {
+    fn from(val: FunctionIndex) -> Self {
+        val.0 as u32
     }
 }
 
@@ -55,15 +55,31 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         // NOTE: we could probbly make some assumption about
         // the smallest usafal machine and ensure we have room
         // for that too.
-        if buffer.len() <= machine_count as usize + 2 {
+        let Some(required) = (machine_count as usize).checked_add(2) else {
+            return Err(MachineBuilderError::MachineCountOverflowsWord(
+                machine_count as usize,
+            ));
+        };
+        if buffer.len() <= required {
             return Err(MachineBuilderError::BufferTooSmall);
         }
 
-        buffer[MACHINE_COUNT_OFFSET] = 0; // Machine count
-        buffer[GLOBALS_SIZE_OFFSET] = 0; // Globals size
+        let Some(machine_count_slot) = buffer.get_mut(MACHINE_COUNT_OFFSET) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        *machine_count_slot = 0; // Machine count
+        let Some(globals_slot) = buffer.get_mut(GLOBALS_SIZE_OFFSET) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        *globals_slot = 0; // Globals size
+        let Some(free) = machine_count.checked_add(2) else {
+            return Err(MachineBuilderError::MachineCountOverflowsWord(
+                machine_count as usize,
+            ));
+        };
         Ok(Self {
             buffer,
-            free: machine_count + 2,
+            free,
             next_machine_builder: 0,
             descriptor: ProgramDescriptor::new(),
         })
@@ -75,37 +91,77 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         globals_size: Word,
     ) -> Result<MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError>
     {
-        self.buffer[MACHINE_COUNT_OFFSET] = self.next_machine_builder + 1;
-        // SAFTY: checked in `new`
-        self.buffer[self.next_machine_builder as usize + MACHINE_TABLE_OFFSET] = self.free as Word;
-        let globals_offset = self.buffer[GLOBALS_SIZE_OFFSET];
+        let Some(next_machine_builder) = self.next_machine_builder.checked_add(1) else {
+            return Err(MachineBuilderError::MachineCountOverflowsWord(
+                self.next_machine_builder as usize,
+            ));
+        };
+        let Some(machine_count_slot) = self.buffer.get_mut(MACHINE_COUNT_OFFSET) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        *machine_count_slot = next_machine_builder;
+        let Some(machine_table_index) = (self.next_machine_builder as usize)
+            .checked_add(MACHINE_TABLE_OFFSET)
+        else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        let Some(machine_table_slot) = self.buffer.get_mut(machine_table_index) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        *machine_table_slot = self.free as Word;
+        let globals_offset = *self
+            .buffer
+            .get(GLOBALS_SIZE_OFFSET)
+            .ok_or(MachineBuilderError::BufferTooSmall)?;
         MachineBuilder::new(self, function_count, globals_size, globals_offset)
     }
 
     fn allocate(&mut self, word_count: Word) -> Result<(), MachineBuilderError> {
-        if self.free as usize + word_count as usize > self.buffer.len() {
+        let free = usize::from(self.free);
+        let word_count = usize::from(word_count);
+        let Some(end) = free.checked_add(word_count) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        if end > self.buffer.len() {
             return Err(MachineBuilderError::BufferTooSmall);
         }
-        self.free += word_count;
+        let Some(new_free) = self.free.checked_add(word_count as Word) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        self.free = new_free;
         Ok(())
     }
 
     fn add_word(&mut self, word: Word) -> Result<(), MachineBuilderError> {
-        if self.free as usize >= self.buffer.len() {
+        let index = usize::from(self.free);
+        let Some(slot) = self.buffer.get_mut(index) else {
             return Err(MachineBuilderError::BufferTooSmall);
-        }
-        self.buffer[self.free as usize] = word;
-        self.free += 1;
-
-        return Ok(());
+        };
+        *slot = word;
+        let Some(new_free) = self.free.checked_add(1) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        self.free = new_free;
+        Ok(())
     }
 
     fn finish_machine(&mut self, globals_size: Word, machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>) -> Result<(), MachineBuilderError>{
         if self.descriptor.add_machine(machine_descriptor).is_err() {
             return Err(MachineBuilderError::MachineCountExceeded);
         }
-        self.buffer[GLOBALS_SIZE_OFFSET] += globals_size;
-        self.next_machine_builder += 1;
+        let Some(globals_slot) = self.buffer.get_mut(GLOBALS_SIZE_OFFSET) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        let Some(new_globals_size) = globals_slot.checked_add(globals_size) else {
+            return Err(MachineBuilderError::TooLarge(globals_size as usize));
+        };
+        *globals_slot = new_globals_size;
+        let Some(next_machine_builder) = self.next_machine_builder.checked_add(1) else {
+            return Err(MachineBuilderError::MachineCountOverflowsWord(
+                self.next_machine_builder as usize,
+            ));
+        };
+        self.next_machine_builder = next_machine_builder;
         Ok(())
     }
 
@@ -157,7 +213,13 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         let size = data.len() as Word;
         let index = DataIndex(self.program.free);
         self.program.allocate(size)?;
-        let target = &mut self.program.buffer[index.0 as usize..(index.0 + size) as usize];
+        let start = usize::from(index.0);
+        let end = start
+            .checked_add(usize::from(size))
+            .ok_or(MachineBuilderError::BufferTooSmall)?; //BUG: this is the worng error. Sould be an overflow error.
+        let Some(target) = self.program.buffer.get_mut(start..end) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
         target.copy_from_slice(data);
         Ok(index)
     }
@@ -167,7 +229,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             return Err(MachineBuilderError::FunctionCoutExceeded);
         }
         let index = FunctionIndex(self.next_function_number);
-        self.next_function_number += 1;
+        let Some(next_function_number) = self.next_function_number.checked_add(1) else {
+            return Err(MachineBuilderError::FunctionCoutExceeded);
+        };
+        self.next_function_number = next_function_number;
         Ok(index)
     }
 
@@ -204,8 +269,17 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         if self.discriptor.add_function(index.clone()).is_err() {
             return Err(MachineBuilderError::FunctionCoutExceeded);
         }
-        let index = self.machine_start as usize + MACHINE_FUNCTIONS_OFFSET + index.0 as usize;
-        self.program.buffer[index as usize] = function_start;
+        let base = usize::from(self.machine_start);
+        let Some(machine_offset) = base.checked_add(MACHINE_FUNCTIONS_OFFSET) else {
+            return Err(MachineBuilderError::BufferTooSmall); // BUG: wrong error
+        };
+        let Some(index) = machine_offset.checked_add(usize::from(index.0)) else {
+            return Err(MachineBuilderError::BufferTooSmall); // BUG: worng error
+        };
+        let Some(slot) = self.program.buffer.get_mut(index) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        *slot = function_start;
         Ok(())
     }
 }

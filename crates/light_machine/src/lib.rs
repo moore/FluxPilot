@@ -1,5 +1,24 @@
 #![no_std]
 
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::arithmetic_side_effects,
+        clippy::panicking_unwrap,
+        clippy::out_of_bounds_indexing,
+        clippy::panic_in_result_fn,
+        clippy::unwrap_in_result,
+    )
+)]
+#![cfg_attr(not(test), warn(clippy::missing_panics_doc))]
+
 use core::mem::transmute;
 use heapless::Vec;
 use thiserror_no_std::Error;
@@ -33,7 +52,6 @@ pub mod builder;
 /// values are u16. This allow the mixture of instructions
 /// and program data in the program section and allows the
 /// stack to have a single type.
-
 pub type Word = u16;
 
 #[repr(u16)] // Must match Word
@@ -135,6 +153,12 @@ impl<const FUNCTION_COUNT_MAX: usize> MachineDescriptor<FUNCTION_COUNT_MAX> {
     }
 }
 
+impl<const FUNCTION_COUNT_MAX: usize> Default for MachineDescriptor<FUNCTION_COUNT_MAX> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct ProgramDescriptor<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     pub length: usize,
@@ -156,6 +180,14 @@ impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>,
     ) -> Result<(), MachineDescriptor<FUNCTION_COUNT_MAX>> {
         self.machines.push(machine_descriptor)
+    }
+}
+
+impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> Default
+    for ProgramDescriptor<MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -197,10 +229,16 @@ impl<'a, 'b> Program<'a, 'b> {
             return Err(MachineError::MachineIndexOutOfRange(machine_number));
         };
         // BOOG check for function out of range.
-        let machine_slot = machine_number as usize + MACHINE_TABLE_OFFSET;
+        let Some(machine_slot) = (machine_number as usize).checked_add(MACHINE_TABLE_OFFSET) else {
+            return Err(MachineError::OutOfBoudsStaticRead(machine_number as usize));
+        };
         let machine_index = read_static(machine_slot, self.static_data)?;
-        let index_function_index =
-            machine_index as usize + MACHINE_FUNCTIONS_OFFSET + function_number;
+        let Some(index_function_index) = (machine_index as usize)
+            .checked_add(MACHINE_FUNCTIONS_OFFSET)
+            .and_then(|base| base.checked_add(function_number))
+        else {
+            return Err(MachineError::OutOfBoudsStaticRead(machine_index as usize));
+        };
         let entry_point = read_static(index_function_index, self.static_data)?;
         Ok(entry_point as usize)
     }
@@ -274,9 +312,9 @@ impl<'a, 'b> Program<'a, 'b> {
                     }
                 }
                 Ops::Push => {
-                    pc += 1;
+                    pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
-                    if let Err(_) = stack.push(word) {
+                    if stack.push(word).is_err() {
                         return Err(MachineError::StackOverflow);
                     }
                 }
@@ -298,7 +336,7 @@ impl<'a, 'b> Program<'a, 'b> {
                 Ops::Add => (),
                 Ops::Subtract => (),
                 Ops::Load => {
-                    pc += 1;
+                    pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
 
                     const {
@@ -309,12 +347,12 @@ impl<'a, 'b> Program<'a, 'b> {
 
                     let word = read_global(index, self.globals)?;
 
-                    if let Err(_) = stack.push(word) {
+                    if stack.push(word).is_err() {
                         return Err(MachineError::StackOverflow);
                     }
                 }
                 Ops::Store => {
-                    pc += 1;
+                    pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
 
                     const {
@@ -323,25 +361,29 @@ impl<'a, 'b> Program<'a, 'b> {
                     // SAFTY: const assersion prouves this is safe
                     let index = word as usize;
 
-                    if index >= self.globals.len() {
-                        return Err(MachineError::OutOfBoundsGlobalsAccess(index));
-                    }
-
                     let Some(word) = stack.pop() else {
                         return Err(MachineError::StackUnderFlow);
                     };
 
-                    self.globals[index] = word;
+                    let Some(slot) = self.globals.get_mut(index) else {
+                        return Err(MachineError::OutOfBoundsGlobalsAccess(index));
+                    };
+                    *slot = word;
                 }
                 Ops::LoadStatic => (),
                 Ops::Jump => (),
                 Ops::Return => break,
             }
-            pc += 1;
+            pc = next_pc(pc)?;
         }
 
         Ok(())
     }
+}
+
+fn next_pc(pc: usize) -> Result<usize, MachineError> {
+    pc.checked_add(1)
+        .ok_or(MachineError::OutOfBoudsStaticRead(pc)) // BUG: This should be OverFlowError
 }
 
 fn read_static(index: usize, program: &[Word]) -> Result<Word, MachineError> {
@@ -361,7 +403,7 @@ fn read_global(index: usize, globals: &[Word]) -> Result<Word, MachineError> {
 fn word_to_color(word: Word) -> Result<u8, MachineError> {
     match word.try_into() {
         Ok(c) => Ok(c),
-        Err(_) => return Err(MachineError::ColorOutOfRange(word)),
+        Err(_) => Err(MachineError::ColorOutOfRange(word)),
     }
 }
 
