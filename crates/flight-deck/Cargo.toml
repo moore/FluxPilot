@@ -14,3 +14,8 @@ postcard = { workspace = true }
 serde = { workspace = true }
 light_machine = {path = "../light_machine"}
 pliot = {path = "../pliot"}
+
+[package.metadata.wasm-pack.profile.release]
+# it would be better to figure out how
+# to make wasm-opt support bulk data
+wasm-opt = false 

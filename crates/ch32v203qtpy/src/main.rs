@@ -30,7 +30,7 @@ use light_machine::{
     builder::{MachineBuilderError, Op, ProgramBuilder},
     Program, Word,
 };
-use pliot::{Pliot, protocol::{Protocol, FunctionId}, meme_storage::MemStorage};
+use pliot::{Pliot, protocol::Protocol, meme_storage::MemStorage};
 use postcard::from_bytes_cobs;
 
 use heapless::Vec;
@@ -55,16 +55,10 @@ static OUTGOING_CHANNEL: StaticCell<Channel<
     Vec<u8, OUTGOING_MESSAGE_CAP>,
     OUTGOING_QUEUE_DEPTH,
 >> = StaticCell::new();
-/* 
-static CHANNEL: Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1> = Channel::new();
-static OUTGOING_CHANNEL: Channel<
-    CriticalSectionRawMutex,
-    Vec<u8, OUTGOING_MESSAGE_CAP>,
-    OUTGOING_QUEUE_DEPTH,
-> = Channel::new();
-*/
+
 static USB_RECEIVE_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 static VM_STACK: StaticCell<Vec<Word, 100>> = StaticCell::new();
+static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -277,8 +271,8 @@ async fn usb_receiver_loop<'d, T: Instance + 'd>(
     receiver: &mut UsbReceiver<'d, Driver<'d, T>>,
     incoming: &Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
 ) -> Result<(), Disconnected> {
-    let mut buf = USB_RECEIVE_BUF.init([0u8; 64]);
-    let mut frame: Vec<u8, INCOMING_MESSAGE_CAP> = Vec::new();
+    let buf = USB_RECEIVE_BUF.init([0u8; 64]);
+    let frame = RAW_MESSAGE_BUFF.init(Vec::new());
     loop {
         let n = receiver.read_packet(buf).await?;
         let data = &buf[..n];

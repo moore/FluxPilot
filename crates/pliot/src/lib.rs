@@ -95,7 +95,7 @@ impl<
                 function,
                 args,
             } => {
-                let results = self.call(stack, function, args)?;
+                let results = self.call(stack, function, &args)?;
                 
                 let result = Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>::Return {
                     request_id,
@@ -193,13 +193,13 @@ impl<
     }
 
 
-    pub fn call<const STACK_SIZE: usize>(&mut self, stack: &mut Vec<Word, STACK_SIZE>, function: FunctionId, args: Vec<Word, MAX_ARGS>) -> Result<Vec<Word, MAX_RESULT>, PliotError> {
+    pub fn call<const STACK_SIZE: usize>(&mut self, stack: &mut Vec<Word, STACK_SIZE>, function: FunctionId, args: &Vec<Word, MAX_ARGS>) -> Result<Vec<Word, MAX_RESULT>, PliotError> {
         let Ok(function_index) = function.function_index.try_into() else {
             return Err(PliotError::FunctionIndexOutOfRange);
         };
 
         for arg in args {
-            if stack.push(arg).is_err() {
+            if stack.push(*arg).is_err() {
                 Err(MachineError::StackOverflow)?;
             }
         }

@@ -7,14 +7,28 @@ const connectBtn = document.getElementById('connect');
 const colorBtns = ['red','green','blue','rainbow'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
-const RECEIVE_QUEUE_KEY = "__receivedQueue__";
 let deck = null;
 let usbReadActive = false;
+
+class DeckReceiveHandler {
+    onReturn(requestId, result) {
+        console.log("return", requestId, Array.from(result));
+    }
+
+    onNotification(machineIndex, functionIndex, result) {
+        console.log("notification", machineIndex, functionIndex, Array.from(result));
+    }
+
+    onError(hasRequestId, requestId, errorCode) {
+        console.warn("error", { hasRequestId, requestId, errorCode });
+    }
+}
+
+const receiveHandler = new DeckReceiveHandler();
 
 export async function initDeck() {
     await init();
     globalThis[SEND_QUEUE_KEY] ??= new AsyncQueue();
-    globalThis[RECEIVE_QUEUE_KEY] ??= new AsyncQueue();
     deck = new FlightDeck();
     return deck;
 }
@@ -30,13 +44,6 @@ export async function consumeQueue() {
         await sendMessage(message);
     }
 } 
-
-export async function consumeIncomingQueue() {
-    while (true) {
-        let message = await globalThis[RECEIVE_QUEUE_KEY].dequeue();
-        console.log("usb message", message);
-    }
-}
 
 function setStatus(msg) {
     statusEl.textContent = msg;
@@ -177,8 +184,8 @@ async function startUsbReceiveLoop(device) {
                     result.data.byteLength
                 );
                 const copy = new Uint8Array(data);
-                console.log("enqueueing data", copy);
-                globalThis[RECEIVE_QUEUE_KEY].enqueue(copy);
+                console.log("about to receive data", copy);
+                deck.receive(copy, receiveHandler);
             } else {
                 console.warn('USB read status:', result.status);
             }

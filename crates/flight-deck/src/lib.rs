@@ -1,9 +1,9 @@
 use wasm_bindgen::prelude::*;
 
-use pliot::protocol::{Controler, FunctionId, Protocol, RequestId};
+use pliot::protocol::{Controler, ErrorType, FunctionId, Protocol, RequestId};
 
 use light_machine::{ProgramDescriptor, Word, builder::*};
-use postcard::{to_vec_cobs};
+use postcard::{to_vec_cobs, from_bytes_cobs};
 
 use heapless::Vec;
 
@@ -15,8 +15,11 @@ type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 
 #[wasm_bindgen]
 pub enum FlightDeckError {
-    ToManyArguments
+    ToManyArguments,
+    CouldNotReceive,
 }
+
+
 #[wasm_bindgen]
 extern "C" {
     pub fn alert(s: &str);
@@ -25,6 +28,31 @@ extern "C" {
 #[wasm_bindgen(module = "/deck.js")]
 extern "C" {
     pub fn send(bytes: &[u8]);
+}
+
+#[wasm_bindgen(module = "/deck.js")]
+extern "C" {
+    #[wasm_bindgen(js_name = ReceiveHandler)]
+    pub type ReceiveHandler;
+
+    #[wasm_bindgen(method, js_name = onReturn)]
+    pub fn on_return(this: &ReceiveHandler, request_id: u64, result: &[Word]);
+
+    #[wasm_bindgen(method, js_name = onNotification)]
+    pub fn on_notification(
+        this: &ReceiveHandler,
+        machine_index: Word,
+        function_index: u32,
+        result: &[Word],
+    );
+
+    #[wasm_bindgen(method, js_name = onError)]
+    pub fn on_error(
+        this: &ReceiveHandler,
+        has_request_id: bool,
+        request_id: u64,
+        error_code: u32,
+    );
 }
 
 
@@ -39,7 +67,6 @@ impl From<RequestId> for WasmRequestId {
 pub struct FlightDeck {
     controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>,
 }
-
 
 
 #[wasm_bindgen]
@@ -78,6 +105,53 @@ impl FlightDeck {
         let request_id = message.get_request_id();
 
         Ok(request_id.map(Into::into))
+    }
+
+    pub fn receive(
+        &mut self,
+        data: &mut [u8],
+        handler: &ReceiveHandler,
+    ) -> Result<(), FlightDeckError> {
+        let message: ProtocolType =
+            from_bytes_cobs(data).map_err(|_| FlightDeckError::CouldNotReceive)?;
+
+        match message {
+            Protocol::Return { request_id, result } => {
+                handler.on_return(request_id.value(), result.as_slice());
+            }
+            Protocol::Notifacation { function, result } => {
+                handler.on_notification(
+                    function.machine_index,
+                    function.function_index,
+                    result.as_slice(),
+                );
+            }
+            Protocol::Error { request_id, error_type } => {
+                let (has_request_id, request_id_value) = match request_id {
+                    Some(id) => (true, id.value()),
+                    None => (false, 0),
+                };
+                handler.on_error(
+                    has_request_id,
+                    request_id_value,
+                    error_code(error_type),
+                );
+            }
+            _ => {
+            }
+        }
+
+        Ok(())   
+    }
+}
+
+fn error_code(error_type: ErrorType) -> u32 {
+    match error_type {
+        ErrorType::UnknownResuestId(_) => 1,
+        ErrorType::UnexpectedProgramBlock(_) => 2,
+        ErrorType::UnknownMachine(_) => 3,
+        ErrorType::UnknownFucntion(_) => 4,
+        ErrorType::UnexpectedMessageType => 5,
     }
 }
 
