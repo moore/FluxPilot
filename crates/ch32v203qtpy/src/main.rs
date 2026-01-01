@@ -8,7 +8,6 @@ use hal::prelude::*;
 use hal::spi::Spi;
 
 use embassy_executor::Spawner;
-use embassy_futures::join::join4;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::Timer;
@@ -30,7 +29,7 @@ use light_machine::{
     builder::{MachineBuilderError, Op, ProgramBuilder},
     Program, Word,
 };
-use pliot::{Pliot, protocol::Protocol, meme_storage::MemStorage};
+use pliot::{Pliot, protocol::{ErrorType, Protocol}, meme_storage::MemStorage};
 use postcard::from_bytes_cobs;
 
 use heapless::Vec;
@@ -46,6 +45,7 @@ const PROGRAM_BLOCK_SIZE: usize = 100;
 const INCOMING_MESSAGE_CAP: usize = 128;
 const OUTGOING_MESSAGE_CAP: usize = 128;
 const OUTGOING_QUEUE_DEPTH: usize = 1;
+const NUM_LEDS: usize = 25;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 
@@ -56,9 +56,17 @@ static OUTGOING_CHANNEL: StaticCell<Channel<
     OUTGOING_QUEUE_DEPTH,
 >> = StaticCell::new();
 
+static PROGRAM_BUFFER: StaticCell<[u16; 100]> = StaticCell::new();
+static GLOBALS: StaticCell<[u16; 10]> = StaticCell::new();
+
 static USB_RECEIVE_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 static VM_STACK: StaticCell<Vec<Word, 100>> = StaticCell::new();
 static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell::new();
+static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+static USB_BOS_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+static USB_STATE: StaticCell<State> = StaticCell::new();
+static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(_spawner: Spawner) {
@@ -93,57 +101,36 @@ async fn main(_spawner: Spawner) {
 
     // Create embassy-usb DeviceBuilder using the driver and config.
     // It needs some buffers for building the descriptors.
-    let mut config_descriptor = [0; 256];
-    let mut bos_descriptor = [0; 256];
-    let mut control_buf = [0; 64];
-
-    let mut state = State::new();
+    let config_descriptor = USB_CONFIG_DESCRIPTOR.init([0; 256]);
+    let bos_descriptor = USB_BOS_DESCRIPTOR.init([0; 256]);
+    let control_buf = USB_CONTROL_BUF.init([0; 64]);
+    let state = USB_STATE.init(State::new());
 
     let mut builder = Builder::new(
         driver,
         config,
-        &mut config_descriptor,
-        &mut bos_descriptor,
+        config_descriptor,
+        bos_descriptor,
         &mut [], // no msos descriptors
-        &mut control_buf,
+        control_buf,
     );
 
     // Create classes on the builder.
-    let class = CdcAcmClass::new(&mut builder, &mut state, 64);
+    let class = CdcAcmClass::new(&mut builder, state, 64);
 
     // Build the builder.
-    let mut usb = builder.build();
-
-    // Run the USB device.
-    let usb_fut = usb.run();
+    let usb = builder.build();
 
     /////////////////////////////////////////////////
-
-    let mut program_buffer = [0u16; 100];
-    get_program(&mut program_buffer).expect("could not get program");
-    let mut globals = [0u16; 10];
-    let stack = VM_STACK.init(Vec::new());
+    let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
+    let globals = GLOBALS.init([0u16; 10]);
     let channel = CHANNEL.init(Channel::new());
     let sender = channel.sender();
     let outgoing_channel = OUTGOING_CHANNEL.init(Channel::new());
     let outgoing_sender = outgoing_channel.sender();
     let outgoing_receiver = outgoing_channel.receiver();
 
-    let (mut usb_sender, mut usb_receiver) = class.split();
-
-    let usb_rx_fut = async {
-        loop {
-            usb_receiver.wait_connection().await;
-            let _ = usb_receiver_loop(&mut usb_receiver, &sender).await;
-        }
-    };
-
-    let usb_tx_fut = async {
-        loop {
-            usb_sender.wait_connection().await;
-            let _ = usb_sender_loop(&mut usb_sender, &outgoing_receiver).await;
-        }
-    };
+    let (usb_sender, usb_receiver) = class.split();
 
     ////////////////////////////////////////////
 
@@ -158,58 +145,97 @@ async fn main(_spawner: Spawner) {
 
     let mut ws = Ws2812::new(spi);
 
-    const NUM_LEDS: usize = 25;
-    let mut data = [RGB8::default(); NUM_LEDS];
+    let data = LED_BUFFER.init([RGB8::default(); NUM_LEDS]);
 
+    _spawner.spawn(usb_device_task(usb)).unwrap();
+    _spawner.spawn(usb_rx_task(usb_receiver, sender)).unwrap();
+    _spawner.spawn(usb_tx_task(usb_sender, outgoing_receiver)).unwrap();
+    led_task(
+            &mut ws,
+            data,
+            channel,
+            outgoing_sender,
+            program_buffer,
+            globals,
+        ).await;
+}
+
+#[embassy_executor::task]
+async fn usb_device_task(
+    mut usb: embassy_usb::UsbDevice<'static, Driver<'static, peripherals::USBD>>,
+) {
+    usb.run().await;
+}
+
+#[embassy_executor::task]
+async fn usb_rx_task(
+    mut receiver: UsbReceiver<'static, Driver<'static, peripherals::USBD>>,
+    incoming: Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
+) {
+    loop {
+        receiver.wait_connection().await;
+        let _ = usb_receiver_loop(&mut receiver, &incoming).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn usb_tx_task(
+    mut sender: UsbSender<'static, Driver<'static, peripherals::USBD>>,
+    outgoing: Receiver<
+        'static,
+        CriticalSectionRawMutex,
+        Vec<u8, OUTGOING_MESSAGE_CAP>,
+        OUTGOING_QUEUE_DEPTH,
+    >,
+) {
+    loop {
+        sender.wait_connection().await;
+        let _ = usb_sender_loop(&mut sender, &outgoing).await;
+    }
+}
+
+async fn led_task(
+    ws: &mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>>,
+    data: &mut [RGB8; NUM_LEDS],
+    channel: &'static Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
+    outgoing_sender: Sender<'static, CriticalSectionRawMutex, Vec<u8, OUTGOING_MESSAGE_CAP>, OUTGOING_QUEUE_DEPTH>,
+    program_buffer: &'static mut [u16; 100],
+    globals: &'static mut [u16; 10],
+) {
+    get_program(program_buffer).expect("could not get program");
     let mut storage = MemStorage::new(program_buffer.as_mut_slice());
-
 
     let memory = globals.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(&mut storage, memory);
 
-    let led_loop = async {
-        let mut use_program = false;
-        loop {
-            for j in 0..(256 * 5) {
-                while let Ok(mut message) = channel.try_receive() {
-                    let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
-                    let wrote = pliot
-                        .process_message(stack, message.as_mut_slice(), out_buf.as_mut_slice())
-                        .expect("Call had error");
-
-                    if wrote > 0 {
-                        let mut response: Vec<u8, OUTGOING_MESSAGE_CAP> = Vec::new();
-                        if response.extend_from_slice(&out_buf[..wrote]).is_ok() {
-                            let _ = outgoing_sender.try_send(response);
-                        }
-                    }
-
-                    use_program = true;
-                }
-                for i in 0..NUM_LEDS {
-                    if use_program {
-                        if let Ok((red, green, blue)) =
-                            pliot.get_led_color(0, i as u16, stack)
-                        {
-                            data[i] = (red, green, blue).into();
-                            stack.clear();
-                        }
-                    } else {
-                        data[i] = wheel(
-                            (((i * 256) as u16 / NUM_LEDS as u16 + j as u16) & 255) as u8,
-                        );
-                    }
-                }
-                ws.write(brightness(data.iter().cloned(), 2)).unwrap();
-                Timer::after_millis(10).await;
+    let stack = VM_STACK.init(Vec::new());
+    loop {
+        
+        for i in 0..data.len() {
+            if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, stack) {
+                data[i] = (red, green, blue).into();
+                stack.clear();
             }
         }
-    };
+        ws.write(brightness(data.iter().cloned(), 2)).unwrap();
 
-    // Run everything concurrently.
-    // If we had made everything `'static` above instead, we could do this using separate tasks instead.
-    join4(usb_fut, usb_rx_fut, usb_tx_fut, led_loop).await;
+        if let Ok(mut message) = channel.try_receive() {
+            let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
+            let wrote = pliot
+                .process_message(stack, message.as_mut_slice(), out_buf.as_mut_slice())
+                .expect("Call had error");
+
+            if wrote > 0 {
+                let mut response: Vec<u8, OUTGOING_MESSAGE_CAP> = Vec::new();
+                if response.extend_from_slice(&out_buf[..wrote]).is_ok() {
+                    let _ = outgoing_sender.try_send(response);
+                }
+            }
+
+        }
+        Timer::after_millis(10).await;
+    }
 }
 
 fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
@@ -305,38 +331,5 @@ async fn usb_sender_loop<'d, T: Instance + 'd>(
     loop {
         let message = outgoing.receive().await;
         sender.write_packet(message.as_slice()).await?;
-    }
-}
-
-fn handle_message<const STACK_SIZE: usize>(
-    message: &mut [u8],
-    program: &mut Program<'_, '_>,
-    stack: &mut Vec<Word, STACK_SIZE>,
-) -> bool {
-    let Ok(decoded) = from_bytes_cobs::<ProtocolType>(message) else {
-        // TODO: Send an error response so the sender knows the message was too large or corrupted.
-        stack.clear();
-        return false;
-    };
-
-    match decoded {
-        Protocol::Call { function, args, .. } => {
-            let Ok(function_index) = function.function_index.try_into() else {
-                stack.clear();
-                return false;
-            };
-
-            for arg in args {
-                if stack.push(arg).is_err() {
-                    stack.clear();
-                    return false;
-                }
-            }
-
-            let result = program.call(function.machine_index, function_index, stack);
-            stack.clear();
-            result.is_ok()
-        }
-        _ => false,
     }
 }
