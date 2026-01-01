@@ -128,8 +128,16 @@ impl<const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZE: u
     }
 
     fn get_request_id(&mut self) -> RequestId {
-        self.next_request += 1;
+        self.next_request = self.next_request.wrapping_add(1);
         RequestId(self.next_request)
+    }
+}
+
+impl<const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZE: usize> Default
+    for Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -169,6 +177,9 @@ impl<'a, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZ
         }
     }
 
+    // BUG: This should be changed to return Result
+    //      Right now there are a bunch of errors
+    //      which are turned in to None.
     pub fn next_message(&mut self) -> Option<Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>> {
         if self.program.len() <= self.next_offset {
             if self.finished {
@@ -184,16 +195,20 @@ impl<'a, const MAX_ARGS: usize, const MAX_RESULT: usize, const PROGRAM_BLOCK_SIZ
         let request_id = self.request_id;
 
         let start = self.next_offset;
-        let end = min(self.program.len(), start + PROGRAM_BLOCK_SIZE);
-        let chunk = &self.program[start..end];
-        self.next_offset += chunk.len();
+        let end = start
+            .checked_add(PROGRAM_BLOCK_SIZE)
+            .map(|end| min(self.program.len(), end))?;
+        let chunk = self.program.get(start..end)?;
+        let next_offset = self.next_offset.checked_add(chunk.len())?;
+        self.next_offset = next_offset;
 
         let Ok(block) = Vec::from_slice(chunk) else {
             return None; // This should not happen
         };
 
         let block_number = self.next_block;
-        self.next_block += 1;
+        let next_block = self.next_block.checked_add(1)?;
+        self.next_block = next_block;
 
         let message = if start == 0 {
             Protocol::LoadProgram {

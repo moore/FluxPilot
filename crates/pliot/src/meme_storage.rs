@@ -21,12 +21,18 @@ impl<'a> Storage for MemStorage<'a> {
     fn get_program_loader(&mut self, size: u32) -> Result<Self::L, StorageError> {
         let size: usize = size.try_into().map_err(|_| StorageError::ProgramTooLarge)?;
 
-        if size > self.program.len() - self.next_program {
+        let Some(available) = self.program.len().checked_sub(self.next_program) else {
+            return Err(StorageError::ProgramTooLarge);
+        };
+        if size > available {
             return Err(StorageError::ProgramTooLarge);
         }
 
         let program_start = self.next_program;
-        self.next_program += size;
+        let Some(next_program) = self.next_program.checked_add(size) else {
+            return Err(StorageError::ProgramTooLarge);
+        };
+        self.next_program = next_program;
 
         Ok(MemProgrameLoader::new(program_start, self.next_program))
     }
@@ -69,12 +75,12 @@ pub struct MemProgrameLoader {
 
 impl MemProgrameLoader {
     fn new(program_start: usize, program_end: usize) -> Self {
-        return Self {
+        Self {
             program_start,
             program_end,
             next_block: 0,
             next_word: program_start,
-        };
+        }
     }
 
     fn add_block(
@@ -94,12 +100,21 @@ impl MemProgrameLoader {
                 return Err(StorageError::ProgramTooLarge);
             }
 
-            program[next_word] = *word;
-            next_word += 1;
+            let Some(slot) = program.get_mut(next_word) else {
+                return Err(StorageError::ProgramTooLarge);
+            };
+            *slot = *word;
+            let Some(updated) = next_word.checked_add(1) else {
+                return Err(StorageError::ProgramTooLarge);
+            };
+            next_word = updated;
         }
 
         self.next_word = next_word;
-        self.next_block += 1;
+        let Some(next_block) = self.next_block.checked_add(1) else {
+            return Err(StorageError::ProgramTooLarge);
+        };
+        self.next_block = next_block;
 
         Ok(())
     }

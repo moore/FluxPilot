@@ -1,4 +1,24 @@
 #![no_std]
+
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::todo,
+        clippy::unimplemented,
+        clippy::indexing_slicing,
+        clippy::string_slice,
+        clippy::arithmetic_side_effects,
+        clippy::panicking_unwrap,
+        clippy::out_of_bounds_indexing,
+        clippy::panic_in_result_fn,
+        clippy::unwrap_in_result,
+    )
+)]
+#![cfg_attr(not(test), warn(clippy::missing_panics_doc))]
+
 pub mod meme_storage;
 pub mod protocol;
 
@@ -22,7 +42,7 @@ pub struct ProgramNumber(pub(crate) usize);
 pub trait Storage {
     type L: Sized;
 
-    fn get_program_loader<'a>(&'a mut self, size: u32) -> Result<Self::L, StorageError>;
+    fn get_program_loader(&mut self, size: u32) -> Result<Self::L, StorageError>;
     fn add_block(
         &mut self,
         loader: &mut Self::L,

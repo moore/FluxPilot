@@ -54,7 +54,7 @@ pub mod builder;
 /// stack to have a single type.
 pub type Word = u16;
 
-fn get_mut_or<'a, E>(slice: &'a mut [Word], index: usize, err: E) -> Result<&'a mut Word, E> {
+fn get_mut_or<E>(slice: &mut [Word], index: usize, err: E) -> Result<&mut Word, E> {
     slice.get_mut(index).ok_or(err)
 }
 
