@@ -7,7 +7,7 @@ const connectBtn = document.getElementById('connect');
 const loadProgramBtn = document.getElementById('load-program');
 const sliderEl = document.getElementById('color-slider');
 const sliderValueEl = document.getElementById('slider-value');
-const colorBtns = ['red','green','blue','rainbow'].map(id => document.getElementById(id));
+const colorBtns = ['red','green','blue'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
 const DECK_KEY = "__flightDeck__";
@@ -317,7 +317,6 @@ const colorCalls = [
     { r: 255, g: 0, b: 0 },
     { r: 0, g: 255, b: 0 },
     { r: 0, g: 0, b: 255 },
-    { r: 255, g: 255, b: 0 },
 ];
 
 colorCalls.forEach((color, i) => colorBtns[i].addEventListener('click', () => {
