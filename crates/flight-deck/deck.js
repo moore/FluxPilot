@@ -13,6 +13,7 @@ const SEND_QUEUE_KEY = "__toSendQueue__";
 const DECK_KEY = "__flightDeck__";
 let usbReadActive = false;
 let pendingRequestId = null;
+let pendingStartTime = 0;
 let pendingTimer = null;
 let pendingColor = null;
 
@@ -69,6 +70,9 @@ function resolvePending(requestId) {
     if (pendingRequestId === null || pendingRequestId !== requestId) {
         return false;
     }
+    const now = performance.now();
+    const runtime = now - pendingStartTime;
+    console.log("request took", runtime);
     pendingRequestId = null;
     if (pendingTimer) {
         clearTimeout(pendingTimer);
@@ -91,6 +95,7 @@ function setPendingTimeout() {
         if (pendingRequestId !== null) {
             pendingRequestId = null;
             if (pendingColor) {
+                pendingStartTime = performance.now();
                 const next = pendingColor;
                 pendingColor = null;
                 scheduleSend(next);
@@ -125,6 +130,7 @@ function sendSliderColor(color) {
         setStatus('Deck not initialized yet.');
         return;
     }
+    pendingStartTime = performance.now();
     const requestId = deck.call(0, 0, [color.r, color.g, color.b]);
     if (requestId === undefined || requestId === null) {
         return;
@@ -306,11 +312,12 @@ sliderEl.addEventListener('input', () => {
     const value = Number(sliderEl.value);
     sliderValueEl.textContent = `${value}`;
     const color = sliderToRgb(value);
+    
     if (pendingRequestId !== null) {
         pendingColor = color;
-        return;
+    } else {
+        sendSliderColor(color);
     }
-    sendSliderColor(color);
 });
 
 const colorCalls = [
