@@ -1,9 +1,10 @@
 
-import init, { FlightDeck } from "/pkg/flight_deck.js";
+import init, { FlightDeck, get_test_program } from "/pkg/flight_deck.js";
 import AsyncQueue from "/async_queue.js";
 
 const statusEl = document.getElementById('status');
 const connectBtn = document.getElementById('connect');
+const loadProgramBtn = document.getElementById('load-program');
 const colorBtns = ['red','green','blue','rainbow'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
@@ -19,8 +20,8 @@ class DeckReceiveHandler {
         console.log("notification", machineIndex, functionIndex, Array.from(result));
     }
 
-    onError(hasRequestId, requestId, errorCode) {
-        console.warn("error", { hasRequestId, requestId, errorCode });
+    onError(hasRequestId, requestId, errorCode, errorString) {
+        console.warn("error", { hasRequestId, requestId, errorCode, errorString});
     }
 }
 
@@ -33,7 +34,10 @@ export async function initDeck() {
     return deck;
 }
 
-export function send(message) {
+export function send(temp_buffer) {
+    // Note: The `message` is a buffer that get's reused.
+    // it will be overwritten in queue if we don't clone it.
+    const message = new Uint8Array(temp_buffer);
     globalThis[SEND_QUEUE_KEY].enqueue(message);
 }
 
@@ -41,6 +45,7 @@ export function send(message) {
 export async function consumeQueue() {
     while (true) {
         let message = await globalThis[SEND_QUEUE_KEY].dequeue();
+        console.log("sending message ->", message);
         await sendMessage(message);
     }
 } 
@@ -50,7 +55,9 @@ function setStatus(msg) {
 }
 
 function enableControls() { 
-    connectBtn.disabled = true; colorBtns.forEach(b => b.disabled = false);
+    connectBtn.disabled = true;
+    loadProgramBtn.disabled = false;
+    colorBtns.forEach(b => b.disabled = false);
 }
 
 export async function connect() {
@@ -198,6 +205,22 @@ async function startUsbReceiveLoop(device) {
 }
 
 connectBtn.addEventListener('click', connect);
+loadProgramBtn.addEventListener('click', () => {
+    if (!deck) {
+        setStatus('Deck not initialized yet.');
+        return;
+    }
+    const programBuffer = new Uint16Array(100);
+    try {
+        const descriptor = get_test_program(programBuffer);
+        console.log(descriptor);
+        deck.load_program(programBuffer, descriptor.length);
+        setStatus(`Loaded program (${descriptor.length} words)`);
+    } catch (err) {
+        console.error('Load program error:', err);
+        setStatus('Load program failed: ' + (err.message || err));
+    }
+});
 
 const colorCalls = [
     { r: 255, g: 0, b: 0 },

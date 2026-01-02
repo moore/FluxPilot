@@ -27,12 +27,26 @@ pub struct FunctionId {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub enum MessageType {
+    Call,
+    Return,
+    Notifacation,
+    Error,
+    LoadProgram,
+    ProgramBlock,
+    FinishProgram,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ErrorType {
     UnknownResuestId(RequestId),
     UnexpectedProgramBlock(u32),
     UnknownMachine(u32),
     UnknownFucntion(u32),
-    UnexpectedMessageType,
+    UnexpectedMessageType(MessageType),
+    ProgramTooLarge,
+    InvalidProgram,
+    UnknownProgram,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

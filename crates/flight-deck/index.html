@@ -10,6 +10,7 @@
         #red { background: red; } #green { background: green; } #blue { background: blue; }
         #rainbow { background: linear-gradient(45deg, red, orange, yellow, green, blue, indigo, violet); }
         #connect { padding: 0.25rem 0.5rem; font-size: 0.9rem; max-width: 120px; flex: none; border-radius: 6px; background: #333; color: white; }
+        #load-program { background: #1b1b1b; }
         #status { margin-top: 1rem; color: #b00; text-align: center; max-width: 90%; white-space: pre-wrap; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
@@ -18,6 +19,7 @@
     
     <button id="connect">Connect Device</button>
     <div class="buttons">
+        <button id="load-program" disabled>Load Program</button>
         <button id="red" disabled>Red</button>
         <button id="green" disabled>Green</button>
         <button id="blue" disabled>Blue</button>

@@ -4,7 +4,7 @@ class AsyncQueue {
     this.resolvers = [];
   }
 
-  enqueue(value) {
+  enqueue(value) {  
    if (this.resolvers.length > 0) {
       const resolve = this.resolvers.shift();
       resolve(value);
@@ -16,7 +16,9 @@ class AsyncQueue {
   dequeue() {
     if (this.values.length > 0) {
         const value = this.values.shift();
-        return Promise.resolve(value);
+        return new Promise((resolve) => {
+            resolve(value);
+        });
     } else {
         return new Promise((resolve) => {
             this.resolvers.push(resolve);

@@ -25,10 +25,10 @@ pub mod protocol;
 use heapless::Vec;
 use light_machine::{MachineError, Program, Word};
 use postcard::from_bytes_cobs;
-use protocol::{Protocol, FunctionId};
+use protocol::{Protocol, FunctionId, ErrorType};
 use thiserror_no_std::Error;
 
-use crate::protocol::RequestId;
+use crate::protocol::{MessageType, RequestId};
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -131,21 +131,21 @@ impl<
                 // right now we send Error(s) we don't receive them but possibly
                 // one day we'll want to make RCPs aginst the UI? For now return
                 // a error if we get an error :P
-                Self::wrire_unexpected_message_type(request_id, out_buff)?
+                Self::write_unexpected_message_type(request_id, MessageType::Error, out_buff)?
             }
 
             Protocol::Return { request_id, .. } => {
                 // right now we send Return(s) we don't receive them but possibly
                 // one day we'll want to make RCPs aginst the UI? For now return
                 // a error if we get an error :P
-                Self::wrire_unexpected_message_type(Some(request_id), out_buff)?
+                Self::write_unexpected_message_type(Some(request_id), MessageType::Return,out_buff)?
             }
 
             Protocol::Notifacation { .. } => {
                 // right now we send Notifacation(s) we don't receive them but possibly
                 // one day we'll want to make RCPs aginst the UI? For now return
                 // a error if we get an error :P
-                Self::wrire_unexpected_message_type(None, out_buff)?
+                Self::write_unexpected_message_type(None, MessageType::Notifacation, out_buff)?
             }
 
             Protocol::LoadProgram {
@@ -155,8 +155,24 @@ impl<
                 block,
             } => {
                 let mut loader = self.storage.get_program_loader(size)?;
-                self.storage
-                    .add_block(&mut loader, block_number, block.as_slice())?;
+                match self.storage
+                    .add_block(&mut loader, block_number, block.as_slice()) {
+                        Ok(_) => {},
+                        Err(error ) => match error {
+                            StorageError::UnexpectedBlock => {
+                                Self::write_unexpected_block(Some(request_id), block_number, out_buff)?;
+                            }
+                            StorageError::InvalidProgram(_error) => {
+                                Self::write_error(Some(request_id), ErrorType::InvalidProgram, out_buff)?;
+                            },
+                            StorageError::ProgramTooLarge => {
+                                Self::write_error(Some(request_id), ErrorType::ProgramTooLarge, out_buff)?;
+                            },
+                            StorageError::UnknownProgram => {
+                                Self::write_error(Some(request_id), ErrorType::UnknownProgram, out_buff)?;
+                            }
+                        }
+                }
                 let current_loader = CurrentLoader { loader, request_id };
                 self.loader = Some(current_loader);
                 0
@@ -170,12 +186,12 @@ impl<
                 match &mut self.loader {
                     None => {
                         // BOOG: should return unexpted request it
-                        Self::wrire_unexpected_message_type(None, out_buff)?
+                        Self::write_unexpected_message_type(Some(request_id), MessageType::ProgramBlock, out_buff)?
                     }
                     Some(current) => {
                         if current.request_id != request_id {
                             // BOOG: should return unexpted request it
-                            Self::wrire_unexpected_message_type(None, out_buff)?
+                            Self::write_unexpected_message_type(Some(request_id), MessageType::ProgramBlock, out_buff)?
                         } else {
                             self.storage.add_block(
                                 &mut current.loader,
@@ -193,13 +209,13 @@ impl<
                 match current {
                     None => {
                         // BOOG: should return unexpted request it
-                        Self::wrire_unexpected_message_type(None, out_buff)?
+                        Self::write_unexpected_message_type(Some(request_id), MessageType::FinishProgram, out_buff)?
                     }
                     Some(current) => {
                         if current.request_id != request_id {
                             // BOOG: should return unexpted request it
                             self.loader = Some(current);
-                            Self::wrire_unexpected_message_type(None, out_buff)?
+                            Self::write_unexpected_message_type(Some(request_id), MessageType::FinishProgram, out_buff)?
                         } else {
                             self.storage.finish_load(current.loader)?;
                             0
@@ -249,13 +265,32 @@ impl<
         Ok(result)
     }
 
-    fn wrire_unexpected_message_type(
+    fn write_unexpected_message_type(
         request_id: Option<RequestId>,
+        message_type: MessageType,
+        out_buff: &mut [u8],
+    ) -> Result<usize, PliotError> {
+        let error_type = ErrorType::UnexpectedMessageType(message_type);
+        Self::write_error(request_id, error_type, out_buff)
+    }
+
+    fn write_unexpected_block(
+        request_id: Option<RequestId>,
+        block_number: u32,
+        out_buff: &mut [u8],
+    ) -> Result<usize, PliotError> {
+        let error_type = ErrorType::UnexpectedProgramBlock(block_number);
+        Self::write_error(request_id, error_type, out_buff)
+    }
+
+    fn write_error(
+        request_id: Option<RequestId>,
+        error_type: ErrorType,
         out_buff: &mut [u8],
     ) -> Result<usize, PliotError> {
         let result = Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>::Error {
             request_id,
-            error_type: protocol::ErrorType::UnexpectedMessageType,
+            error_type,
         };
 
         let wrote = postcard::to_slice_cobs(&result, out_buff)?;
@@ -263,6 +298,9 @@ impl<
         Ok(wrote.len())
     }
 }
+
+
+
 
 #[cfg(test)]
 mod test;

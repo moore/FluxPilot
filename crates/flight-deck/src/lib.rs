@@ -1,11 +1,12 @@
 use wasm_bindgen::prelude::*;
 
-use pliot::protocol::{Controler, ErrorType, FunctionId, Protocol, RequestId};
+use pliot::protocol::{Controler, ErrorType, FunctionId, MessageType, Protocol};
 
 use light_machine::{ProgramDescriptor, Word, builder::*};
 use postcard::{to_vec_cobs, from_bytes_cobs};
 
 use heapless::Vec;
+use std::vec::Vec as StdVec;
 
 const MAX_ARGS: usize = 3;
 const MAX_RESULT: usize = 3;
@@ -17,12 +18,19 @@ type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 pub enum FlightDeckError {
     ToManyArguments,
     CouldNotReceive,
+    InvalidProgramLength,
 }
 
 
 #[wasm_bindgen]
 extern "C" {
     pub fn alert(s: &str);
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = log)]
+    pub fn console_log(s: &str);
 }
 
 #[wasm_bindgen(module = "/deck.js")]
@@ -52,6 +60,7 @@ extern "C" {
         has_request_id: bool,
         request_id: u64,
         error_code: u32,
+        error_message: &str,
     );
 }
 
@@ -60,6 +69,51 @@ extern "C" {
 #[wasm_bindgen]
 pub struct FlightDeck {
     controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>,
+}
+
+#[wasm_bindgen]
+pub struct ProgramDescriptorJs {
+    length: usize,
+    machine_function_counts: StdVec<u32>,
+}
+
+impl ProgramDescriptorJs {
+    fn from_descriptor<const MACHINE_COUNT: usize, const FUNCTION_COUNT: usize>(
+        descriptor: ProgramDescriptor<MACHINE_COUNT, FUNCTION_COUNT>,
+    ) -> Self {
+        let machine_function_counts = descriptor
+            .machines
+            .iter()
+            .map(|machine| machine.functions.len() as u32)
+            .collect();
+        Self {
+            length: descriptor.length,
+            machine_function_counts,
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl ProgramDescriptorJs {
+    #[wasm_bindgen(getter)]
+    pub fn length(&self) -> usize {
+        self.length
+    }
+
+    pub fn machine_count(&self) -> u32 {
+        self.machine_function_counts.len() as u32
+    }
+
+    pub fn function_counts(&self) -> StdVec<u32> {
+        self.machine_function_counts.clone()
+    }
+
+    pub fn function_count(&self, machine_index: usize) -> Result<u32, JsValue> {
+        self.machine_function_counts
+            .get(machine_index)
+            .copied()
+            .ok_or_else(|| JsValue::from_str("machine index out of range"))
+    }
 }
 
 
@@ -128,10 +182,12 @@ impl FlightDeck {
                     Some(id) => (true, id.value()),
                     None => (false, 0),
                 };
+                let message = error_message(&error_type);
                 handler.on_error(
                     has_request_id,
                     request_id_value,
-                    error_code(error_type),
+                    error_code(&error_type),
+                    &message,
                 );
             }
             _ => {
@@ -140,51 +196,123 @@ impl FlightDeck {
 
         Ok(())   
     }
+
+    pub fn load_program(&mut self, program: &[Word], length: usize) -> Result<(), FlightDeckError> {
+        if length > program.len() {
+            return Err(FlightDeckError::InvalidProgramLength);
+        }
+
+        let program = &program[..length];
+        let mut loader = self.controler.get_program_loader(program);
+        while let Some(message) = loader.next() {
+            let message_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
+            send(message_buf.as_slice());
+        }
+
+        Ok(())
+    }
 }
 
-fn error_code(error_type: ErrorType) -> u32 {
+const fn error_code(error_type: &ErrorType) -> u32 {
     match error_type {
         ErrorType::UnknownResuestId(_) => 1,
         ErrorType::UnexpectedProgramBlock(_) => 2,
         ErrorType::UnknownMachine(_) => 3,
         ErrorType::UnknownFucntion(_) => 4,
-        ErrorType::UnexpectedMessageType => 5,
+        ErrorType::UnexpectedMessageType(_) => 5,
+        ErrorType::ProgramTooLarge => 6,
+        ErrorType::InvalidProgram => 7,
+        ErrorType::UnknownProgram => 8,
     }
 }
 
-fn get_test_program(buffer: &mut [u16]) -> ProgramDescriptor<1, 2> {
+fn error_message(error_type: &ErrorType) -> String {
+    match error_type {
+        ErrorType::UnknownResuestId(_) => "unknown request id".to_string(),
+        ErrorType::UnexpectedProgramBlock(_) => "unexpected program block".to_string(),
+        ErrorType::UnknownMachine(_) => "unknown machine".to_string(),
+        ErrorType::UnknownFucntion(_) => "unknown function".to_string(),
+        ErrorType::UnexpectedMessageType(message_type) => {
+            format!("unexpected message type {}", message_type_name(message_type))
+        }
+        ErrorType::ProgramTooLarge => "program too large".to_string(),
+        ErrorType::InvalidProgram => "invalid program".to_string(),
+        ErrorType::UnknownProgram => "unknown program".to_string(),
+    }
+}
+
+const fn message_type_name(message_type: &MessageType) -> &'static str {
+    match message_type {
+        MessageType::Call => "Call",
+        MessageType::Return => "Return",
+        MessageType::Notifacation => "Notifacation",
+        MessageType::Error => "Error",
+        MessageType::LoadProgram => "LoadProgram",
+        MessageType::ProgramBlock => "ProgramBlock",
+        MessageType::FinishProgram => "FinishProgram",
+    }
+}
+
+#[wasm_bindgen]
+pub fn get_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptorJs, JsValue> {
+    let descriptor = build_test_program(buffer)?;
+    Ok(ProgramDescriptorJs::from_descriptor(descriptor))
+}
+
+fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsValue> {
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 2;
     let program_builder =
         ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(buffer, MACHINE_COUNT as u16)
-            .expect("could not get machine builder");
+            .map_err(|_| JsValue::from_str("could not get machine builder"))?;
 
     let globals_size = 3;
     let machine = program_builder
         .new_machine(FUNCTION_COUNT as u16, globals_size)
-        .expect("could not get new machine");
+        .map_err(|_| JsValue::from_str("could not get new machine"))?;
 
     let mut function = machine
         .new_function()
-        .expect("could not get fucntion builder");
-    function.add_op(Op::Store(0)).expect("could not add op");
-    function.add_op(Op::Store(1)).expect("could not add op");
-    function.add_op(Op::Store(2)).expect("could not add op");
-    function.add_op(Op::Return).expect("could not add op");
-    let (_store_function_index, machine) = function.finish().expect("Could not finishe function");
+        .map_err(|_| JsValue::from_str("could not get function builder"))?;
+    function
+        .add_op(Op::Store(0))
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    function
+        .add_op(Op::Store(1))
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    function
+        .add_op(Op::Store(2))
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    function
+        .add_op(Op::Return)
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    let (_store_function_index, machine) = function
+        .finish()
+        .map_err(|_| JsValue::from_str("could not finish function"))?;
 
     let mut function = machine
         .new_function()
-        .expect("could not get fucntion builder");
-    function.add_op(Op::Load(0)).expect("could not add op");
-    function.add_op(Op::Load(1)).expect("could not add op");
-    function.add_op(Op::Load(2)).expect("could not add op");
-    function.add_op(Op::Return).expect("could not add op");
-    let (_get_function_index, machine) = function.finish().expect("Could not finish function");
+        .map_err(|_| JsValue::from_str("could not get function builder"))?;
+    function
+        .add_op(Op::Load(0))
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    function
+        .add_op(Op::Load(1))
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    function
+        .add_op(Op::Load(2))
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    function
+        .add_op(Op::Return)
+        .map_err(|_| JsValue::from_str("could not add op"))?;
+    let (_get_function_index, machine) = function
+        .finish()
+        .map_err(|_| JsValue::from_str("could not finish function"))?;
 
-    let program_builder = machine.finish().expect("Could not finish machine");
+    let program_builder =
+        machine.finish().map_err(|_| JsValue::from_str("could not finish machine"))?;
 
     let descriptor = program_builder.finish_program();
 
-    descriptor
+    Ok(descriptor)
 }
