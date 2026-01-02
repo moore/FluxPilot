@@ -11,6 +11,9 @@
         #rainbow { background: linear-gradient(45deg, red, orange, yellow, green, blue, indigo, violet); }
         #connect { padding: 0.25rem 0.5rem; font-size: 0.9rem; max-width: 120px; flex: none; border-radius: 6px; background: #333; color: white; }
         #load-program { background: #1b1b1b; }
+        .slider-wrap { margin-top: 1rem; width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 0.5rem; }
+        .slider-label { font-size: 0.95rem; color: #222; display: flex; justify-content: space-between; }
+        #color-slider { width: 100%; }
         #status { margin-top: 1rem; color: #b00; text-align: center; max-width: 90%; white-space: pre-wrap; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
     </style>
@@ -24,6 +27,13 @@
         <button id="green" disabled>Green</button>
         <button id="blue" disabled>Blue</button>
         <button id="rainbow" disabled>Rainbow</button>
+    </div>
+    <div class="slider-wrap">
+        <div class="slider-label">
+            <span>Color Slider</span>
+            <span id="slider-value">0</span>
+        </div>
+        <input id="color-slider" type="range" min="0" max="1023" value="0" disabled />
     </div>
     <div id="status" role="alert"></div>
     <script type="module">

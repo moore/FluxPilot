@@ -5,15 +5,21 @@ import AsyncQueue from "/async_queue.js";
 const statusEl = document.getElementById('status');
 const connectBtn = document.getElementById('connect');
 const loadProgramBtn = document.getElementById('load-program');
+const sliderEl = document.getElementById('color-slider');
+const sliderValueEl = document.getElementById('slider-value');
 const colorBtns = ['red','green','blue','rainbow'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
 let deck = null;
 let usbReadActive = false;
+let pendingRequestId = null;
+let pendingTimer = null;
+let pendingColor = null;
 
 class DeckReceiveHandler {
     onReturn(requestId, result) {
         console.log("return", requestId, Array.from(result));
+        resolvePending(requestId);
     }
 
     onNotification(machineIndex, functionIndex, result) {
@@ -57,7 +63,81 @@ function setStatus(msg) {
 function enableControls() { 
     connectBtn.disabled = true;
     loadProgramBtn.disabled = false;
+    sliderEl.disabled = false;
     colorBtns.forEach(b => b.disabled = false);
+}
+
+function resolvePending(requestId) {
+    if (pendingRequestId === null || pendingRequestId !== requestId) {
+        return false;
+    }
+    pendingRequestId = null;
+    if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        pendingTimer = null;
+    }
+    if (pendingColor) {
+        const next = pendingColor;
+        pendingColor = null;
+        scheduleSend(next);
+    }
+    return true;
+}
+
+function setPendingTimeout() {
+    if (pendingTimer) {
+        clearTimeout(pendingTimer);
+    }
+    pendingTimer = setTimeout(() => {
+        pendingTimer = null;
+        if (pendingRequestId !== null) {
+            pendingRequestId = null;
+            if (pendingColor) {
+                const next = pendingColor;
+                pendingColor = null;
+                scheduleSend(next);
+            }
+        }
+    }, 200);
+}
+
+function sliderToRgb(value) {
+    const clamped = Math.max(0, Math.min(1023, value));
+    const t = clamped / 1023;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (t <= 0.5) {
+        const p = t / 0.5;
+        r = 0;
+        g = Math.round(255 * p);
+        b = Math.round(255 * (1 - p));
+    } else {
+        const p = (t - 0.5) / 0.5;
+        r = Math.round(255 * p);
+        g = Math.round(255 * (1 - p));
+        b = 0;
+    }
+    return { r, g, b };
+}
+
+function sendSliderColor(color) {
+    if (!deck) {
+        setStatus('Deck not initialized yet.');
+        return;
+    }
+    const requestId = deck.call(0, 0, [color.r, color.g, color.b]);
+    if (requestId === undefined || requestId === null) {
+        return;
+    }
+    pendingRequestId = requestId;
+    setPendingTimeout();
+}
+
+function scheduleSend(color) {
+    setTimeout(() => {
+        sendSliderColor(color);
+    }, 0);
 }
 
 export async function connect() {
@@ -220,6 +300,21 @@ loadProgramBtn.addEventListener('click', () => {
         console.error('Load program error:', err);
         setStatus('Load program failed: ' + (err.message || err));
     }
+});
+
+sliderEl.addEventListener('input', () => {
+    if (!deck) {
+        setStatus('Deck not initialized yet.');
+        return;
+    }
+    const value = Number(sliderEl.value);
+    sliderValueEl.textContent = `${value}`;
+    const color = sliderToRgb(value);
+    if (pendingRequestId !== null) {
+        pendingColor = color;
+        return;
+    }
+    sendSliderColor(color);
 });
 
 const colorCalls = [
