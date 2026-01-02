@@ -244,7 +244,7 @@ async fn led_task(
         }
         // BUG: we need to log and error or update an error
         // counter instead of silighently ignoring the error
-        let _ = ws.write(brightness(data.iter().cloned(), 2));
+        let _ = ws.write(brightness(data.iter().cloned(), 64));
 
         if let Ok(mut message) = channel.try_receive() {
             let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];

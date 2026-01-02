@@ -10,7 +10,7 @@ const sliderValueEl = document.getElementById('slider-value');
 const colorBtns = ['red','green','blue','rainbow'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
-let deck = null;
+const DECK_KEY = "__flightDeck__";
 let usbReadActive = false;
 let pendingRequestId = null;
 let pendingTimer = null;
@@ -18,7 +18,6 @@ let pendingColor = null;
 
 class DeckReceiveHandler {
     onReturn(requestId, result) {
-        console.log("return", requestId, Array.from(result));
         resolvePending(requestId);
     }
 
@@ -36,8 +35,8 @@ const receiveHandler = new DeckReceiveHandler();
 export async function initDeck() {
     await init();
     globalThis[SEND_QUEUE_KEY] ??= new AsyncQueue();
-    deck = new FlightDeck();
-    return deck;
+    globalThis[DECK_KEY] ??= new FlightDeck();
+    return globalThis[DECK_KEY];
 }
 
 export function send(temp_buffer) {
@@ -51,7 +50,6 @@ export function send(temp_buffer) {
 export async function consumeQueue() {
     while (true) {
         let message = await globalThis[SEND_QUEUE_KEY].dequeue();
-        console.log("sending message ->", message);
         await sendMessage(message);
     }
 } 
@@ -122,6 +120,7 @@ function sliderToRgb(value) {
 }
 
 function sendSliderColor(color) {
+    let deck = globalThis[DECK_KEY];
     if (!deck) {
         setStatus('Deck not initialized yet.');
         return;
@@ -142,7 +141,6 @@ function scheduleSend(color) {
 
 export async function connect() {
     setStatus('');
-    console.log("in my connect");
     // Try Web Serial first, fallback to WebUSB if not available
     if (false && 'serial' in navigator) {
         try {
@@ -195,7 +193,6 @@ export async function connect() {
         if (alternateSetting !== 0) {
             await device.selectAlternateInterface(interfaceNumber, alternateSetting);
         }
-        console.log("did claime interface", device);
         /*
         // Try to claim interface, handling if it's already claimed
         try {
@@ -263,7 +260,6 @@ async function startUsbReceiveLoop(device) {
     while (writer && writer.type === 'usb' && writer.device === device) {
         try {
             const result = await device.transferIn(writer.inEndpoint, 64);
-            console.log("did transfer in", result);
             if (result.status === 'ok' && result.data) {
                 const data = new Uint8Array(
                     result.data.buffer,
@@ -271,7 +267,11 @@ async function startUsbReceiveLoop(device) {
                     result.data.byteLength
                 );
                 const copy = new Uint8Array(data);
-                console.log("about to receive data", copy);
+                let deck = globalThis[DECK_KEY];
+                if (!deck) {
+                    setStatus('Deck not initialized yet.');
+                    continue;
+                }
                 deck.receive(copy, receiveHandler);
             } else {
                 console.warn('USB read status:', result.status);
@@ -286,6 +286,7 @@ async function startUsbReceiveLoop(device) {
 
 connectBtn.addEventListener('click', connect);
 loadProgramBtn.addEventListener('click', () => {
+    let deck = globalThis[DECK_KEY];
     if (!deck) {
         setStatus('Deck not initialized yet.');
         return;
@@ -293,7 +294,6 @@ loadProgramBtn.addEventListener('click', () => {
     const programBuffer = new Uint16Array(100);
     try {
         const descriptor = get_test_program(programBuffer);
-        console.log(descriptor);
         deck.load_program(programBuffer, descriptor.length);
         setStatus(`Loaded program (${descriptor.length} words)`);
     } catch (err) {
@@ -303,10 +303,6 @@ loadProgramBtn.addEventListener('click', () => {
 });
 
 sliderEl.addEventListener('input', () => {
-    if (!deck) {
-        setStatus('Deck not initialized yet.');
-        return;
-    }
     const value = Number(sliderEl.value);
     sliderValueEl.textContent = `${value}`;
     const color = sliderToRgb(value);
@@ -325,13 +321,12 @@ const colorCalls = [
 ];
 
 colorCalls.forEach((color, i) => colorBtns[i].addEventListener('click', () => {
+    let deck = globalThis[DECK_KEY];
     if (!deck) {
-        setStatus('Deck not initialized yet.');
+        setStatus('Deck not initialized yet???');
         return;
     }
-    console.log("calling function:", 0, 0, [color.r, color.g, color.b]);
     const request_id = deck.call(0, 0, [color.r, color.g, color.b]);
-    console.log("request complete", request_id);
 }));
 
 // Initial check
