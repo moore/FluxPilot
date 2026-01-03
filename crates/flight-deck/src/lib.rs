@@ -2,7 +2,12 @@ use wasm_bindgen::prelude::*;
 
 use pliot::protocol::{Controler, ErrorType, FunctionId, MessageType, Protocol};
 
-use light_machine::{ProgramDescriptor, Word, builder::*};
+use light_machine::{
+    ProgramDescriptor,
+    Word,
+    assembler::{Assembler, AssemblerError, AssemblerErrorKind},
+    builder::*,
+};
 use postcard::{to_vec_cobs, from_bytes_cobs};
 
 use heapless::Vec;
@@ -11,6 +16,10 @@ use std::vec::Vec as StdVec;
 const MAX_ARGS: usize = 3;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
+const ASM_MACHINE_MAX: usize = 8;
+const ASM_FUNCTION_MAX: usize = 32;
+const ASM_LABEL_CAP: usize = 64;
+const ASM_DATA_CAP: usize = 256;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 
@@ -259,6 +268,30 @@ pub fn get_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptorJs, JsVal
     Ok(ProgramDescriptorJs::from_descriptor(descriptor))
 }
 
+#[wasm_bindgen]
+pub fn compile_program(source: &str, buffer: &mut [u16]) -> Result<ProgramDescriptorJs, JsValue> {
+    let machine_count = count_machines(source)?;
+    let builder = ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(buffer, machine_count)
+        .map_err(|_| JsValue::from_str("program buffer too small for machine count"))?;
+    let mut assembler: Assembler<
+        ASM_MACHINE_MAX,
+        ASM_FUNCTION_MAX,
+        ASM_LABEL_CAP,
+        ASM_DATA_CAP,
+    > = Assembler::new(builder);
+
+    for line in source.lines() {
+        assembler
+            .add_line(line)
+            .map_err(|err| assembler_error_to_js(err))?;
+    }
+
+    let descriptor = assembler
+        .finish()
+        .map_err(|err| assembler_error_to_js(err))?;
+    Ok(ProgramDescriptorJs::from_descriptor(descriptor))
+}
+
 fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsValue> {
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 2;
@@ -315,4 +348,52 @@ fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsV
     let descriptor = program_builder.finish_program();
 
     Ok(descriptor)
+}
+
+fn count_machines(source: &str) -> Result<u16, JsValue> {
+    let mut count: u16 = 0;
+    for line in source.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if line.starts_with(".machine") {
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| JsValue::from_str("machine count overflow"))?;
+        }
+    }
+    if count == 0 {
+        return Err(JsValue::from_str("no .machine directive found"));
+    }
+    Ok(count)
+}
+
+fn assembler_error_to_js(err: AssemblerError) -> JsValue {
+    let kind = match err.error_kind() {
+        AssemblerErrorKind::EmptyLine => "empty line",
+        AssemblerErrorKind::TooManyTokens => "too many tokens",
+        AssemblerErrorKind::InvalidDirective => "invalid directive",
+        AssemblerErrorKind::InvalidInstruction => "invalid instruction",
+        AssemblerErrorKind::InvalidNumber => "invalid number",
+        AssemblerErrorKind::NameTooLong => "name too long",
+        AssemblerErrorKind::DuplicateLabel => "duplicate label",
+        AssemblerErrorKind::MaxLabelsExceeded => "max labels exceeded",
+        AssemblerErrorKind::UnknownLabel => "unknown label",
+        AssemblerErrorKind::MissingMachine => "missing machine",
+        AssemblerErrorKind::MissingFunction => "missing function",
+        AssemblerErrorKind::MissingProgram => "missing program",
+        AssemblerErrorKind::UnexpectedDirective => "unexpected directive",
+        AssemblerErrorKind::UnexpectedInstruction => "unexpected instruction",
+        AssemblerErrorKind::FunctionAlreadyDefined => "function already defined",
+        AssemblerErrorKind::FunctionNotDeclared => "function not declared",
+        AssemblerErrorKind::FunctionIndexOutOfRange => "function index out of range",
+        AssemblerErrorKind::FunctionIndexDuplicate => "function index duplicate",
+        AssemblerErrorKind::MaxFunctionsExceeded => "max functions exceeded",
+        AssemblerErrorKind::LineNumberOverflow => "line number overflow",
+        AssemblerErrorKind::CursorOverflow => "cursor overflow",
+        AssemblerErrorKind::DataTooLarge => "data too large",
+        AssemblerErrorKind::Builder(_) => "builder error",
+    };
+    match err.line_number() {
+        Some(line) => JsValue::from_str(&format!("line {}: {}", line, kind)),
+        None => JsValue::from_str(kind),
+    }
 }

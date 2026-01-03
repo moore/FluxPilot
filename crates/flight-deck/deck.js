@@ -1,5 +1,5 @@
 
-import init, { FlightDeck, get_test_program } from "/pkg/flight_deck.js";
+import init, { FlightDeck, compile_program } from "/pkg/flight_deck.js";
 import AsyncQueue from "/async_queue.js";
 
 const statusEl = document.getElementById('status');
@@ -7,6 +7,7 @@ const connectBtn = document.getElementById('connect');
 const loadProgramBtn = document.getElementById('load-program');
 const sliderEl = document.getElementById('color-slider');
 const sliderValueEl = document.getElementById('slider-value');
+const editorEl = document.getElementById('program-editor');
 const colorBtns = ['red','green','blue'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
@@ -37,6 +38,27 @@ export async function initDeck() {
     await init();
     globalThis[SEND_QUEUE_KEY] ??= new AsyncQueue();
     globalThis[DECK_KEY] ??= new FlightDeck();
+    if (editorEl && !editorEl.value.trim()) {
+        editorEl.value = [
+            ".machine main globals 3 functions 2",
+            "",
+            ".func set_rgb index 0",
+            "    STORE 0",
+            "    STORE 1",
+            "    STORE 2",
+            "    RETURN",
+            ".end",
+            "",
+            ".func get_rgb index 1",
+            "    LOAD 0",
+            "    LOAD 1",
+            "    LOAD 2",
+            "    RETURN",
+            ".end",
+            "",
+            ".end",
+        ].join("\n");
+    }
     return globalThis[DECK_KEY];
 }
 
@@ -302,9 +324,14 @@ loadProgramBtn.addEventListener('click', () => {
         setStatus('Deck not initialized yet.');
         return;
     }
-    const programBuffer = new Uint16Array(100);
+    if (!editorEl) {
+        setStatus('Program editor not available.');
+        return;
+    }
+    const programBuffer = new Uint16Array(512);
     try {
-        const descriptor = get_test_program(programBuffer);
+        console.log("loading program", editorEl.value);
+        const descriptor = compile_program(editorEl.value, programBuffer);
         deck.load_program(programBuffer, descriptor.length);
         setStatus(`Loaded program (${descriptor.length} words)`);
     } catch (err) {
