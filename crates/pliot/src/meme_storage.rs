@@ -21,6 +21,10 @@ impl<'a> Storage for MemStorage<'a> {
     fn get_program_loader(&mut self, size: u32) -> Result<Self::L, StorageError> {
         let size: usize = size.try_into().map_err(|_| StorageError::ProgramTooLarge)?;
 
+        // For now lets just hard code that we allway use program 0
+        // in the future we would like to have more then one program
+        // and a way to switch between them but lets do the simple thing now.
+        self.next_program = 0;
         let Some(available) = self.program.len().checked_sub(self.next_program) else {
             return Err(StorageError::ProgramTooLarge);
         };
