@@ -293,6 +293,25 @@ pub enum Op {
     Pop,
     Load(Word),
     Store(Word),
+    LoadStatic(Word),
+    Jump(Word),
+    BranchLessThan(Word),
+    BranchLessThanEq(Word),
+    BranchGreaterThan(Word),
+    BranchGreaterThanEq(Word),
+    BranchEqual(Word),
+    And,
+    Or,
+    Xor,
+    Not,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    BitwiseNot,
+    Multiply,
+    Devide,
+    Add,
+    Subtract,
     Return,
 }
 
@@ -339,6 +358,70 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
                 }
                 self.machine.add_word(Ops::Store.into())?;
                 self.machine.add_word(address)?;
+            }
+            Op::LoadStatic(address) => {
+                self.machine.add_word(Ops::LoadStatic.into())?;
+                self.machine.add_word(address)?;
+            }
+            Op::Jump(address) => {
+                self.machine.add_word(Ops::Jump.into())?;
+                self.machine.add_word(address)?;
+            }
+            Op::BranchLessThan(address) => {
+                self.machine.add_word(Ops::BranchLessThan.into())?;
+                self.machine.add_word(address)?;
+            }
+            Op::BranchLessThanEq(address) => {
+                self.machine.add_word(Ops::BranchLessThanEq.into())?;
+                self.machine.add_word(address)?;
+            }
+            Op::BranchGreaterThan(address) => {
+                self.machine.add_word(Ops::BranchGreaterThan.into())?;
+                self.machine.add_word(address)?;
+            }
+            Op::BranchGreaterThanEq(address) => {
+                self.machine.add_word(Ops::BranchGreaterThanEq.into())?;
+                self.machine.add_word(address)?;
+            }
+            Op::BranchEqual(address) => {
+                self.machine.add_word(Ops::BranchEqual.into())?;
+                self.machine.add_word(address)?;
+            }
+            Op::And => {
+                self.machine.add_word(Ops::And.into())?;
+            }
+            Op::Or => {
+                self.machine.add_word(Ops::Or.into())?;
+            }
+            Op::Xor => {
+                self.machine.add_word(Ops::Xor.into())?;
+            }
+            Op::Not => {
+                self.machine.add_word(Ops::Not.into())?;
+            }
+            Op::BitwiseAnd => {
+                self.machine.add_word(Ops::BitwiseAnd.into())?;
+            }
+            Op::BitwiseOr => {
+                self.machine.add_word(Ops::BitwiseOr.into())?;
+            }
+            Op::BitwiseXor => {
+                self.machine.add_word(Ops::BitwiseXor.into())?;
+            }
+            Op::BitwiseNot => {
+                self.machine.add_word(Ops::BitwiseNot.into())?;
+            }
+            Op::Multiply => {
+                self.machine.add_word(Ops::Multiply.into())?;
+            }
+            Op::Devide => {
+                self.machine.add_word(Ops::Devide.into())?;
+            }
+            Op::Add => {
+                self.machine.add_word(Ops::Add.into())?;
+            }
+            Op::Subtract => {
+                self.machine.add_word(Ops::Subtract.into())?;
             }
             Op::Return => {
                 self.machine.add_word(Ops::Return.into())?;

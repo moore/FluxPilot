@@ -27,6 +27,10 @@ use variant_count::VariantCount;
 use crate::builder::FunctionIndex;
 
 pub mod builder;
+pub mod assembler;
+
+#[cfg(test)]
+mod assembler_test;
 /// This module implments the vitural machine for FluxPilot.
 /// A machine takes three memory regions when it is initilized:
 /// `

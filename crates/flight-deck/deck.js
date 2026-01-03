@@ -146,7 +146,7 @@ function scheduleSend(color) {
 }
 
 export async function connect() {
-    setStatus('');
+    setStatus('Connecting...');
     // Try Web Serial first, fallback to WebUSB if not available
     if (false && 'serial' in navigator) {
         try {
@@ -164,10 +164,15 @@ export async function connect() {
     
     // Fallback to WebUSB
     if (!('usb' in navigator)) {
-        setStatus('Neither Web Serial nor WebUSB available.');
+        setStatus('WebUSB not available in this browser.');
+        return;
+    }
+    if (!window.isSecureContext) {
+        setStatus('WebUSB requires HTTPS or localhost.');
         return;
     }
     try {
+        setStatus('Requesting USB device...');
         // WCH CH32V203 and common USB chip vendor IDs
         const filters = [
             { vendorId: 0xc0de },
