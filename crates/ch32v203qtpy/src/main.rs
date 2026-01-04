@@ -29,7 +29,8 @@ use hal::spi::Spi;
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
-use embassy_time::Timer;
+use embassy_time::{Duration, with_timeout,};
+//use embassy_time::{Timer, Instant};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver as UsbReceiver, Sender as UsbSender, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
@@ -231,7 +232,12 @@ async fn led_task(
 
     let stack = VM_STACK.init(Vec::new());
     loop {
-        
+        // If I could track times I could make my anamations
+        // have really tight timeing when there is no message
+        // to process but this makes the program a little too
+        // large. If I can find some spae else where lets try
+        // this agin.
+        //let start_time = Instant::now();
         for (i, led) in data.iter_mut().enumerate() {
             if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, stack) {
                 *led = (red, green, blue).into();
@@ -242,7 +248,16 @@ async fn led_task(
         // counter instead of silighently ignoring the error
         let _ = ws.write(brightness(data.iter().cloned(), 64));
 
-        if let Ok(mut message) = channel.try_receive() {
+        //let elapsed_time = start_time.elapsed();
+
+        let wait = Duration::from_millis(10);// - elapsed_time;
+        // Convert the duration to milliseconds
+        //let elapsed_ms = elapsed_time.as_millis();
+
+        //let wait_ms = 10u64.saturating_sub(elapsed_ms);
+
+        //if let Ok(mut message) = channel.try_receive() {
+        if let Ok(mut message) = with_timeout(wait, channel.receive()).await {
             let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
             let wrote = match pliot.process_message(
                 stack,
@@ -271,7 +286,7 @@ async fn led_task(
             }
 
         }
-        Timer::after_millis(10).await;
+        //Timer::after_millis(10).await;
     }
 }
 
