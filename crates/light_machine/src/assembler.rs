@@ -644,7 +644,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             "BRGT" | "brgt" => Op::BranchGreaterThan,
             "BRGTE" | "brgte" => Op::BranchGreaterThanEq,
             "BREQ" | "breq" => Op::BranchEqual,
-            "RETURN" | "return" => Op::Return,
+            "EXIT" | "exit" => Op::Exit,
             "AND" | "and" => Op::And,
             "OR" | "or" => Op::Or,
             "XOR" | "xor" => Op::Xor,

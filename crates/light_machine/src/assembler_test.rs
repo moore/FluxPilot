@@ -12,13 +12,13 @@ fn assembles_basic_program() {
     asm.add_line("STORE 0").unwrap();
     asm.add_line("STORE 1").unwrap();
     asm.add_line("STORE 2").unwrap();
-    asm.add_line("RETURN").unwrap();
+    asm.add_line("EXIT").unwrap();
     asm.add_line(".end").unwrap();
     asm.add_line(".func get_rgb index 1").unwrap();
     asm.add_line("LOAD 0").unwrap();
     asm.add_line("LOAD 1").unwrap();
     asm.add_line("LOAD 2").unwrap();
-    asm.add_line("RETURN").unwrap();
+    asm.add_line("EXIT").unwrap();
     asm.add_line(".end").unwrap();
     asm.add_line(".end").unwrap();
 
@@ -36,10 +36,10 @@ fn supports_forward_function_declaration() {
     asm.add_line(".machine main globals 1 functions 2").unwrap();
     asm.add_line(".func_decl later index 1").unwrap();
     asm.add_line(".func first index 0").unwrap();
-    asm.add_line("RETURN").unwrap();
+    asm.add_line("EXIT").unwrap();
     asm.add_line(".end").unwrap();
     asm.add_line(".func later").unwrap();
-    asm.add_line("RETURN").unwrap();
+    asm.add_line("EXIT").unwrap();
     asm.add_line(".end").unwrap();
     asm.add_line(".end").unwrap();
 

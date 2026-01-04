@@ -42,13 +42,13 @@ fn test_init_get_color() -> Result<(), MachineError> {
         "STORE 0",
         "STORE 1",
         "STORE 2",
-        "RETURN",
+        "EXIT",
         ".end",
         ".func get_rgb index 1",
         "LOAD 0",
         "LOAD 1",
         "LOAD 2",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -95,7 +95,7 @@ fn op_push() -> Result<(), MachineError> {
         ".machine main globals 0 functions 1",
         ".func main index 0",
         "PUSH 42",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -113,7 +113,7 @@ fn op_pop() -> Result<(), MachineError> {
         ".func main index 0",
         "PUSH 1",
         "POP",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -132,7 +132,7 @@ fn op_sload() -> Result<(), MachineError> {
         "PUSH 10",
         "PUSH 20",
         "SLOAD 1",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -152,7 +152,7 @@ fn op_sstore() -> Result<(), MachineError> {
         "PUSH 2",
         "PUSH 3",
         "SSTORE 2",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -169,7 +169,7 @@ fn op_load() -> Result<(), MachineError> {
         ".machine main globals 1 functions 1",
         ".func main index 0",
         "LOAD 0",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -187,7 +187,7 @@ fn op_store() -> Result<(), MachineError> {
         ".func main index 0",
         "PUSH 7",
         "STORE 0",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -209,7 +209,7 @@ fn op_load_static() -> Result<(), MachineError> {
         ".end",
         ".func main index 0",
         "LOAD_STATIC consts",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -227,10 +227,10 @@ fn op_jump() -> Result<(), MachineError> {
         ".func main index 0",
         "JUMP target",
         "PUSH 1",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -250,10 +250,10 @@ fn op_branch_less_than() -> Result<(), MachineError> {
         "PUSH 2",
         "BRLT target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -273,10 +273,10 @@ fn op_branch_less_than_false() -> Result<(), MachineError> {
         "PUSH 2",
         "BRLT target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -296,10 +296,10 @@ fn op_branch_less_than_eq() -> Result<(), MachineError> {
         "PUSH 2",
         "BRLTE target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -319,10 +319,10 @@ fn op_branch_less_than_eq_false() -> Result<(), MachineError> {
         "PUSH 1",
         "BRLTE target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -342,10 +342,10 @@ fn op_branch_greater_than() -> Result<(), MachineError> {
         "PUSH 2",
         "BRGT target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -365,10 +365,10 @@ fn op_branch_greater_than_false() -> Result<(), MachineError> {
         "PUSH 3",
         "BRGT target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -388,10 +388,10 @@ fn op_branch_greater_than_eq() -> Result<(), MachineError> {
         "PUSH 2",
         "BRGTE target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -411,10 +411,10 @@ fn op_branch_greater_than_eq_false() -> Result<(), MachineError> {
         "PUSH 2",
         "BRGTE target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -434,10 +434,10 @@ fn op_branch_equal() -> Result<(), MachineError> {
         "PUSH 5",
         "BREQ target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -457,10 +457,10 @@ fn op_branch_equal_false() -> Result<(), MachineError> {
         "PUSH 6",
         "BREQ target",
         "PUSH 9",
-        "RETURN",
+        "EXIT",
         "target:",
         "PUSH 7",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -479,7 +479,7 @@ fn op_and() -> Result<(), MachineError> {
         "PUSH 1",
         "PUSH 2",
         "AND",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -498,7 +498,7 @@ fn op_and_false() -> Result<(), MachineError> {
         "PUSH 1",
         "PUSH 0",
         "AND",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -517,7 +517,7 @@ fn op_or() -> Result<(), MachineError> {
         "PUSH 0",
         "PUSH 2",
         "OR",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -536,7 +536,7 @@ fn op_or_false() -> Result<(), MachineError> {
         "PUSH 0",
         "PUSH 0",
         "OR",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -555,7 +555,7 @@ fn op_xor() -> Result<(), MachineError> {
         "PUSH 0",
         "PUSH 2",
         "XOR",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -574,7 +574,7 @@ fn op_xor_false() -> Result<(), MachineError> {
         "PUSH 1",
         "PUSH 1",
         "XOR",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -592,7 +592,7 @@ fn op_not() -> Result<(), MachineError> {
         ".func main index 0",
         "PUSH 0",
         "NOT",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -610,7 +610,7 @@ fn op_not_false() -> Result<(), MachineError> {
         ".func main index 0",
         "PUSH 1",
         "NOT",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -629,7 +629,7 @@ fn op_bitwise_and() -> Result<(), MachineError> {
         "PUSH 0x0F0F",
         "PUSH 0x00FF",
         "BAND",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -648,7 +648,7 @@ fn op_bitwise_or() -> Result<(), MachineError> {
         "PUSH 0x0F0F",
         "PUSH 0x00F0",
         "BOR",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -667,7 +667,7 @@ fn op_bitwise_xor() -> Result<(), MachineError> {
         "PUSH 0x0F0F",
         "PUSH 0x00FF",
         "BXOR",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -685,7 +685,7 @@ fn op_bitwise_not() -> Result<(), MachineError> {
         ".func main index 0",
         "PUSH 0x00FF",
         "BNOT",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -704,7 +704,7 @@ fn op_multiply() -> Result<(), MachineError> {
         "PUSH 6",
         "PUSH 7",
         "MUL",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -723,7 +723,7 @@ fn op_divide() -> Result<(), MachineError> {
         "PUSH 84",
         "PUSH 7",
         "DIV",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -742,7 +742,7 @@ fn op_add() -> Result<(), MachineError> {
         "PUSH 5",
         "PUSH 7",
         "ADD",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -761,7 +761,7 @@ fn op_subtract() -> Result<(), MachineError> {
         "PUSH 10",
         "PUSH 3",
         "SUB",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);
@@ -773,12 +773,12 @@ fn op_subtract() -> Result<(), MachineError> {
 }
 
 #[test]
-fn op_return() -> Result<(), MachineError> {
+fn op_exit() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
-        "RETURN",
+        "EXIT",
         "PUSH 2",
         ".end",
         ".end",
@@ -796,11 +796,11 @@ fn multi_function_calls() -> Result<(), MachineError> {
         ".machine main globals 0 functions 2",
         ".func helper index 1",
         "PUSH 77",
-        "RETURN",
+        "EXIT",
         ".end",
         ".func main index 0",
         "CALL helper",
-        "RETURN",
+        "EXIT",
         ".end",
         ".end",
     ]);

@@ -98,7 +98,7 @@ Control flow:
 - `BRGT`                ; Pop addr and compare a > b
 - `BRGTE`               ; Pop addr and compare a >= b
 - `BREQ`                ; Pop addr and compare a == b
-- `RETURN`              ; Return from function
+- `EXIT`              ; Return from function
 
 Logic ops (reserved):
 
@@ -123,7 +123,7 @@ Only these are executed today:
 - `JUMP`: pop addr and jump.
 - `CALL`: pop function index, call function, resume after.
 - `BRLT`/`BRLTE`/`BRGT`/`BRGTE`/`BREQ`: pop addr and compare.
-- `RETURN`: return from function.
+- `EXIT`: return from function.
 
 Reserved instructions assemble but are not executed yet. Programs using them
 should be treated as "future programs" and may error at runtime.
@@ -147,14 +147,14 @@ This example mirrors the test program used in code:
         STORE 0
         STORE 1
         STORE 2
-        RETURN
+        EXIT
     .end
 
     .func get_rgb index 1
         LOAD 0
         LOAD 1
         LOAD 2
-        RETURN
+        EXIT
     .end
 
     .end
@@ -183,7 +183,7 @@ Whitespace and comments can appear between any tokens.
 
     mnemonic       = "PUSH" | "POP" | "SLOAD" | "SSTORE" | "LOAD" | "STORE" | "LOAD_STATIC"
                    | "JUMP" | "CALL" | "BRLT" | "BRLTE" | "BRGT" | "BRGTE" | "BREQ"
-                   | "RETURN"
+                   | "EXIT"
                    | "AND" | "OR" | "XOR" | "NOT"
                    | "BAND" | "BOR" | "BXOR" | "BNOT"
                    | "ADD" | "SUB" | "MUL" | "DIV" ;

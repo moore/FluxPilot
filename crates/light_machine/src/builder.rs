@@ -327,7 +327,7 @@ pub enum Op {
     Devide,
     Add,
     Subtract,
-    Return,
+    Exit,
 }
 
 pub struct FunctionBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
@@ -450,8 +450,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             Op::Subtract => {
                 self.machine.add_word(Ops::Subtract.into())?;
             }
-            Op::Return => {
-                self.machine.add_word(Ops::Return.into())?;
+            Op::Exit => {
+                self.machine.add_word(Ops::Exit.into())?;
             }
         }
 

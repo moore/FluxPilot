@@ -318,7 +318,7 @@ fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsV
         .add_op(Op::Store(2))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
-        .add_op(Op::Return)
+        .add_op(Op::Exit)
         .map_err(|_| JsValue::from_str("could not add op"))?;
     let (_store_function_index, machine) = function
         .finish()
@@ -337,7 +337,7 @@ fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsV
         .add_op(Op::Load(2))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
-        .add_op(Op::Return)
+        .add_op(Op::Exit)
         .map_err(|_| JsValue::from_str("could not add op"))?;
     let (_get_function_index, machine) = function
         .finish()

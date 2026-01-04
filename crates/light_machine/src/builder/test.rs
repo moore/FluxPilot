@@ -74,10 +74,10 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
         0,
         Ops::Store.into(),
         1,
-        Ops::Return.into(),
+        Ops::Exit.into(),
         Ops::Load.into(),   // Function 2
         1,
-        Ops::Return.into(),
+        Ops::Exit.into(),
     ];
 
     let mut buffer = [0u16; 20];
@@ -92,12 +92,12 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
     function.add_op(Op::Push(11))?;
     function.add_op(Op::Load(0))?;
     function.add_op(Op::Store(1))?;
-    function.add_op(Op::Return)?;
+    function.add_op(Op::Exit)?;
     let (_fn_index, machine) = function.finish()?;
 
     let mut function = machine.new_function_at_index(funtion_index)?;
     function.add_op(Op::Load(1))?;
-    function.add_op(Op::Return)?;
+    function.add_op(Op::Exit)?;
     let (_fn_index, machine) = function.finish()?;
 
     let _program: ProgramBuilder<'_, MACHINE_COUNT, FUNCTION_COUNT> = machine.finish()?;

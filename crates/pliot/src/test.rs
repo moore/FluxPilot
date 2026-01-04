@@ -39,7 +39,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     function.add_op(Op::Store(0)).expect("could not add op");
     function.add_op(Op::Store(1)).expect("could not add op");
     function.add_op(Op::Store(2)).expect("could not add op");
-    function.add_op(Op::Return).expect("could not add op");
+    function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 
     let mut function = machine
@@ -48,7 +48,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     function.add_op(Op::Load(0)).expect("could not add op");
     function.add_op(Op::Load(1)).expect("could not add op");
     function.add_op(Op::Load(2)).expect("could not add op");
-    function.add_op(Op::Return).expect("could not add op");
+    function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 
     let program_builder = machine.finish().expect("Could not finish program");

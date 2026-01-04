@@ -302,14 +302,14 @@ fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
     function.add_op(Op::Store(0))?;
     function.add_op(Op::Store(1))?;
     function.add_op(Op::Store(2))?;
-    function.add_op(Op::Return)?;
+    function.add_op(Op::Exit)?;
     let (_function_index, machine) = function.finish()?;
 
     let mut function = machine.new_function()?;
     function.add_op(Op::Load(0))?;
     function.add_op(Op::Load(1))?;
     function.add_op(Op::Load(2))?;
-    function.add_op(Op::Return)?;
+    function.add_op(Op::Exit)?;
     let (_function_index, machine) = function.finish()?;
 
     let _program_builder = machine.finish()?;

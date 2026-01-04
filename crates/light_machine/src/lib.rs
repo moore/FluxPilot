@@ -93,7 +93,7 @@ pub enum Ops {
     Store,
     LoadStatic,
     Jump,
-    Return,
+    Exit,
     Call,
     StackLoad,
     StackStore,
@@ -498,7 +498,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     *slot = value;
                     let _ = pop(stack)?;
                 }
-                Ops::Return => break,
+                Ops::Exit => break,
                 Ops::Call => {
                     let function_index = pop(stack)? as usize;
                     let entry_point = self.get_function_entry(machine_number, function_index)?;
