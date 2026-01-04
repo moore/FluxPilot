@@ -29,8 +29,8 @@ use hal::spi::Spi;
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
-use embassy_time::{Duration, with_timeout,};
-//use embassy_time::{Timer, Instant};
+use embassy_sync::mutex::Mutex;
+use embassy_time::{Timer, Instant, Duration};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
 
@@ -67,6 +67,7 @@ const INCOMING_MESSAGE_CAP: usize = 128;
 const OUTGOING_MESSAGE_CAP: usize = 128;
 const OUTGOING_QUEUE_DEPTH: usize = 1;
 const NUM_LEDS: usize = 25;
+const FRAME_TARGET: u64 = 16;
 
 static CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>> = StaticCell::new();
 static OUTGOING_CHANNEL: StaticCell<Channel<
@@ -77,17 +78,22 @@ static OUTGOING_CHANNEL: StaticCell<Channel<
 
 static PROGRAM_BUFFER: StaticCell<[u16; 100]> = StaticCell::new();
 static GLOBALS: StaticCell<[u16; 10]> = StaticCell::new();
-
+static MEM_STORAGE: StaticCell<MemStorage<'static>> = StaticCell::new();
 static USB_RECEIVE_BUF: StaticCell<[u8; 64]> = StaticCell::new();
-static VM_STACK: StaticCell<Vec<Word, 100>> = StaticCell::new();
 static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell::new();
-static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
-static USB_BOS_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
+static USB_BOS_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
 static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
+static PLIOT_SHARED: StaticCell<Mutex<CriticalSectionRawMutex, PliotShared>> = StaticCell::new();
+
+struct PliotShared {
+    pliot: Pliot<'static, 'static, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage<'static>>,
+    stack: Vec<Word, 100>,
+}
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
-async fn main(spawner: Spawner) {
+async fn main(spawner: Spawner) -> () {
     #[cfg(debug_assertions)]
     hal::debug::SDIPrint::enable();
     let config = hal::Config{ rcc: hal::rcc::Config::SYSCLK_FREQ_144MHZ_HSI, ..Default::default() };
@@ -119,8 +125,8 @@ async fn main(spawner: Spawner) {
 
     // Create embassy-usb DeviceBuilder using the driver and config.
     // It needs some buffers for building the descriptors.
-    let config_descriptor = USB_CONFIG_DESCRIPTOR.init([0; 256]);
-    let bos_descriptor = USB_BOS_DESCRIPTOR.init([0; 256]);
+    let config_descriptor = USB_CONFIG_DESCRIPTOR.init([0; 64]);
+    let bos_descriptor = USB_BOS_DESCRIPTOR.init([0; 64]);
     let control_buf = USB_CONTROL_BUF.init([0; 64]);
     let mut builder = Builder::new(
         driver,
@@ -140,6 +146,15 @@ async fn main(spawner: Spawner) {
     /////////////////////////////////////////////////
     let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
     let globals = GLOBALS.init([0u16; 10]);
+    if get_program(program_buffer).is_err() {
+        // BUG: we should log here.
+        return;
+    }
+    let storage = MEM_STORAGE.init(MemStorage::new(program_buffer.as_mut_slice()));
+    let shared = PLIOT_SHARED.init(Mutex::new(PliotShared {
+        pliot: Pliot::new(storage, globals.as_mut_slice()),
+        stack: Vec::new(),
+    }));
     let channel = CHANNEL.init(Channel::new());
     let sender = channel.sender();
     let outgoing_channel = OUTGOING_CHANNEL.init(Channel::new());
@@ -168,13 +183,11 @@ async fn main(spawner: Spawner) {
     let _ = spawner.spawn(usb_device_task(usb));
     let _ = spawner.spawn(usb_rx_task(usb_receiver, sender));
     let _ = spawner.spawn(usb_tx_task(usb_sender, outgoing_receiver));
+    let _ = spawner.spawn(pliot_task(shared, channel, outgoing_sender));
     led_task(
             &mut ws,
             data,
-            channel,
-            outgoing_sender,
-            program_buffer,
-            globals,
+            shared,
         ).await;
 }
 
@@ -215,78 +228,71 @@ async fn usb_tx_task(
 async fn led_task(
     ws: &mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>>,
     data: &mut [RGB8; NUM_LEDS],
-    channel: &'static Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
-    outgoing_sender: Sender<'static, CriticalSectionRawMutex, Vec<u8, OUTGOING_MESSAGE_CAP>, OUTGOING_QUEUE_DEPTH>,
-    program_buffer: &'static mut [u16; 100],
-    globals: &'static mut [u16; 10],
+    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
 ) {
-    if get_program(program_buffer).is_err() {
-        // BUG: we should log here.
-        return;
-    }
-    let mut storage = MemStorage::new(program_buffer.as_mut_slice());
-
-    let memory = globals.as_mut_slice();
-    let mut pliot =
-        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(&mut storage, memory);
-
-    let stack = VM_STACK.init(Vec::new());
     loop {
         // If I could track times I could make my anamations
         // have really tight timeing when there is no message
         // to process but this makes the program a little too
         // large. If I can find some spae else where lets try
         // this agin.
-        //let start_time = Instant::now();
-        for (i, led) in data.iter_mut().enumerate() {
-            if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, stack) {
-                *led = (red, green, blue).into();
-                stack.clear();
+        let start_time = Instant::now();
+        {
+            let mut guard = shared.lock().await;
+            let PliotShared { pliot, stack } = &mut *guard;
+            for (i, led) in data.iter_mut().enumerate() {
+                if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, stack) {
+                    *led = (red, green, blue).into();
+                    stack.clear();
+                }
             }
         }
-        // BUG: we need to log and error or update an error
-        // counter instead of silighently ignoring the error
+
+
         let _ = ws.write(brightness(data.iter().cloned(), 64));
+        
+        let wait_duration = match Duration::from_millis(FRAME_TARGET).checked_sub(start_time.elapsed()) {
+            Some(d) => d,
+            None => Duration::from_millis(0),
+        };
 
-        //let elapsed_time = start_time.elapsed();
+        Timer::after(wait_duration).await;
+    }
+}
 
-        let wait = Duration::from_millis(10);// - elapsed_time;
-        // Convert the duration to milliseconds
-        //let elapsed_ms = elapsed_time.as_millis();
-
-        //let wait_ms = 10u64.saturating_sub(elapsed_ms);
-
-        //if let Ok(mut message) = channel.try_receive() {
-        if let Ok(mut message) = with_timeout(wait, channel.receive()).await {
-            let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
-            let wrote = match pliot.process_message(
-                stack,
-                message.as_mut_slice(),
-                out_buf.as_mut_slice(),
-            ) {
+#[embassy_executor::task]
+async fn pliot_task(
+    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
+    channel: &'static Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
+    outgoing_sender: Sender<'static, CriticalSectionRawMutex, Vec<u8, OUTGOING_MESSAGE_CAP>, OUTGOING_QUEUE_DEPTH>,
+) {
+    loop {
+        let mut message = channel.receive().await;
+        let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
+        let wrote = {
+            let mut guard = shared.lock().await;
+            let PliotShared { pliot, stack } = &mut *guard;
+            match pliot.process_message(stack, message.as_mut_slice(), out_buf.as_mut_slice()) {
                 Ok(wrote) => wrote,
                 Err(_) => {
                     // BUG: we should log error
                     stack.clear();
                     0
                 }
-            };
-
-            if wrote > 0 {
-                let mut response: Vec<u8, OUTGOING_MESSAGE_CAP> = Vec::new();
-                if let Some(bytes) = out_buf.get(..wrote) {
-                    
-                    if response.extend_from_slice(bytes).is_ok() {
-                        let _ = outgoing_sender.try_send(response);
-                    }
-                } else {
-                    //BUG: this should be unreachable but we should log
-                    // to catch bugs introduced in refactoring.
-                }
             }
+        };
 
+        if wrote > 0 {
+            let mut response: Vec<u8, OUTGOING_MESSAGE_CAP> = Vec::new();
+            if let Some(bytes) = out_buf.get(..wrote) {
+                if response.extend_from_slice(bytes).is_ok() {
+                    let _ = outgoing_sender.try_send(response);
+                }
+            } else {
+                //BUG: this should be unreachable but we should log
+                // to catch bugs introduced in refactoring.
+            }
         }
-        //Timer::after_millis(10).await;
     }
 }
 
