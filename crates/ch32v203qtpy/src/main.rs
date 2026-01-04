@@ -44,7 +44,7 @@ mod vendor_class;
 
 use crate::vendor_class::{VendorClass, VendorReceiver, VendorSender};
 use crate::ws2812::Ws2812;
-use smart_leds::{brightness, SmartLedsWrite, RGB8};
+use smart_leds::{SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
 
 use light_machine::{
@@ -249,7 +249,7 @@ async fn led_task(
         }
 
 
-        let _ = ws.write(brightness(data.iter().cloned(), 64));
+        let _ = ws.write(data.clone());
         
         let wait_duration = match Duration::from_millis(FRAME_TARGET).checked_sub(start_time.elapsed()) {
             Some(d) => d,

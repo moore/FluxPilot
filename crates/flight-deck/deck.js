@@ -7,6 +7,8 @@ const connectBtn = document.getElementById('connect');
 const loadProgramBtn = document.getElementById('load-program');
 const sliderEl = document.getElementById('color-slider');
 const sliderValueEl = document.getElementById('slider-value');
+const brightnessEl = document.getElementById('brightness-slider');
+const brightnessValueEl = document.getElementById('brightness-value');
 const editorEl = document.getElementById('program-editor');
 const colorBtns = ['red','green','blue'].map(id => document.getElementById(id));
 let writer = null;
@@ -17,6 +19,7 @@ let pendingRequestId = null;
 let pendingStartTime = 0;
 let pendingTimer = null;
 let pendingColor = null;
+let currentColor = { r: 0, g: 0, b: 0 };
 
 class DeckReceiveHandler {
     onReturn(requestId, result) {
@@ -85,6 +88,7 @@ function enableControls() {
     connectBtn.disabled = true;
     loadProgramBtn.disabled = false;
     sliderEl.disabled = false;
+    brightnessEl.disabled = false;
     colorBtns.forEach(b => b.disabled = false);
 }
 
@@ -146,14 +150,30 @@ function sliderToRgb(value) {
     return { r, g, b };
 }
 
+function brightnessScale() {
+    const value = Number(brightnessEl?.value ?? 100);
+    const clamped = Math.max(0, Math.min(100, value));
+    return clamped / 100;
+}
+
+function applyBrightness(color) {
+    const scale = brightnessScale();
+    return {
+        r: Math.round(color.r * scale),
+        g: Math.round(color.g * scale),
+        b: Math.round(color.b * scale),
+    };
+}
+
 function sendSliderColor(color) {
     let deck = globalThis[DECK_KEY];
     if (!deck) {
         setStatus('Deck not initialized yet.');
         return;
     }
+    const scaled = applyBrightness(color);
     pendingStartTime = performance.now();
-    const requestId = deck.call(0, 0, [color.r, color.g, color.b]);
+    const requestId = deck.call(0, 0, [scaled.r, scaled.g, scaled.b]);
     if (requestId === undefined || requestId === null) {
         return;
     }
@@ -344,11 +364,23 @@ sliderEl.addEventListener('input', () => {
     const value = Number(sliderEl.value);
     sliderValueEl.textContent = `${value}`;
     const color = sliderToRgb(value);
+    currentColor = color;
     
     if (pendingRequestId !== null) {
         pendingColor = color;
     } else {
         sendSliderColor(color);
+    }
+});
+
+brightnessEl.addEventListener('input', () => {
+    const value = Number(brightnessEl.value);
+    const clamped = Math.max(0, Math.min(100, value));
+    brightnessValueEl.textContent = `${clamped}%`;
+    if (pendingRequestId !== null) {
+        pendingColor = currentColor;
+    } else {
+        sendSliderColor(currentColor);
     }
 });
 
@@ -364,7 +396,9 @@ colorCalls.forEach((color, i) => colorBtns[i].addEventListener('click', () => {
         setStatus('Deck not initialized yet???');
         return;
     }
-    const request_id = deck.call(0, 0, [color.r, color.g, color.b]);
+    currentColor = color;
+    const scaled = applyBrightness(color);
+    const request_id = deck.call(0, 0, [scaled.r, scaled.g, scaled.b]);
 }));
 
 // Initial check
