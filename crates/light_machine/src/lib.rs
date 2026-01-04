@@ -95,6 +95,8 @@ pub enum Ops {
     Jump,
     Return,
     Call,
+    StackLoad,
+    StackStore,
 }
 
 impl From<Ops> for Word {
@@ -467,6 +469,34 @@ impl<'a, 'b> Program<'a, 'b> {
                 Ops::Jump => {
                     pc = pop(stack)? as usize;
                     continue;
+                }
+                Ops::StackLoad => {
+                    pc = next_pc(pc)?;
+                    let offset = read_static(pc, self.static_data)? as usize;
+                    let index = stack
+                        .len()
+                        .checked_sub(1)
+                        .and_then(|top| top.checked_sub(offset))
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    let value = *stack
+                        .get(index)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    push(stack, value)?;
+                }
+                Ops::StackStore => {
+                    pc = next_pc(pc)?;
+                    let offset = read_static(pc, self.static_data)? as usize;
+                    let index = stack
+                        .len()
+                        .checked_sub(1)
+                        .and_then(|top| top.checked_sub(offset))
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    let value = *stack.last().ok_or(MachineError::StackUnderFlow)?;
+                    let slot = stack
+                        .get_mut(index)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    *slot = value;
+                    let _ = pop(stack)?;
                 }
                 Ops::Return => break,
                 Ops::Call => {

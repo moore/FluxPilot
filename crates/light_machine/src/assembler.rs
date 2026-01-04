@@ -604,6 +604,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 | "load"
                 | "STORE"
                 | "store"
+                | "SLOAD"
+                | "sload"
+                | "SSTORE"
+                | "sstore"
         );
 
         let operand = if expects_operand {
@@ -624,6 +628,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 AssemblerErrorKind::InvalidInstruction,
             ))?),
             "STORE" | "store" => Op::Store(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
+            "SLOAD" | "sload" => Op::StackLoad(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
+            "SSTORE" | "sstore" => Op::StackStore(operand.ok_or(AssemblerError::Kind(
                 AssemblerErrorKind::InvalidInstruction,
             ))?),
             "LOAD_STATIC" | "load_static" => Op::LoadStatic,

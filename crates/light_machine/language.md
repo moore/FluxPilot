@@ -66,6 +66,8 @@ assembler accepts an operand and expands it to `PUSH <operand>` + `<op>`.
 Stack ops:
 - `PUSH <word>`         ; Push immediate word (2 words total)
 - `POP`                 ; Pop and discard
+- `SLOAD <offset>`      ; Push stack[top - offset] (2 words total)
+- `SSTORE <offset>`     ; Store top at stack[top - offset] (2 words total)
 
 Globals ops:
 - `LOAD <addr>`         ; Push globals[addr] (2 words total)
@@ -97,6 +99,8 @@ Only these are executed today:
 - `POP`: pop top of stack, error if empty.
 - `LOAD <addr>`: read globals[addr], push; error if addr out of range.
 - `STORE <addr>`: pop and store to globals[addr], error if empty/out of range.
+- `SLOAD <offset>`: push stack[top - offset], error if out of range.
+- `SSTORE <offset>`: store top into stack[top - offset], error if out of range.
 - `LOAD_STATIC`: pop addr, push static_data[addr].
 - `JUMP`: pop addr and jump.
 - `CALL`: pop function index, call function, resume after.
@@ -156,7 +160,7 @@ Whitespace and comments can appear between any tokens.
     data_word      = ".word" number | number ;
     operand        = number | ident ;
 
-    mnemonic       = "PUSH" | "POP" | "LOAD" | "STORE" | "LOAD_STATIC"
+    mnemonic       = "PUSH" | "POP" | "SLOAD" | "SSTORE" | "LOAD" | "STORE" | "LOAD_STATIC"
                    | "JUMP" | "CALL" | "BRLT" | "BRLTE" | "BRGT" | "BRGTE" | "BREQ"
                    | "RETURN"
                    | "AND" | "OR" | "XOR" | "NOT"
