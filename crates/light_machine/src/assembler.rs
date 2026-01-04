@@ -475,6 +475,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         match mnemonic {
             "LOAD_STATIC" | "load_static" => self.emit_stack_target(tokens, Op::LoadStatic),
             "JUMP" | "jump" => self.emit_stack_target(tokens, Op::Jump),
+            "CALL" | "call" => self.emit_stack_target(tokens, Op::Call),
             "BRLT" | "brlt" => self.emit_stack_target(tokens, Op::BranchLessThan),
             "BRLTE" | "brlte" => self.emit_stack_target(tokens, Op::BranchLessThanEq),
             "BRGT" | "brgt" => self.emit_stack_target(tokens, Op::BranchGreaterThan),
@@ -627,6 +628,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ))?),
             "LOAD_STATIC" | "load_static" => Op::LoadStatic,
             "JUMP" | "jump" => Op::Jump,
+            "CALL" | "call" => Op::Call,
             "BRLT" | "brlt" => Op::BranchLessThan,
             "BRLTE" | "brlte" => Op::BranchLessThanEq,
             "BRGT" | "brgt" => Op::BranchGreaterThan,
@@ -663,6 +665,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         }
         if let Some(label) = self.static_labels.iter().find(|label| label.name == name) {
             return Ok(Some(label.offset));
+        }
+        if let Some(entry) = self.funcs.iter().find(|entry| entry.name == name) {
+            return Ok(Some(entry.index));
         }
 
         if matches!(self.block, BlockKind::Function) {

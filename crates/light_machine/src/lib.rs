@@ -94,6 +94,7 @@ pub enum Ops {
     LoadStatic,
     Jump,
     Return,
+    Call,
 }
 
 impl From<Ops> for Word {
@@ -262,7 +263,7 @@ impl<'a, 'b> Program<'a, 'b> {
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let entry_point = self.get_function_entry(machine_number, INIT_OFFSET)?;
-        self.run(entry_point, stack)?;
+        self.run(machine_number, entry_point, stack)?;
         Ok(())
     }
 
@@ -276,7 +277,7 @@ impl<'a, 'b> Program<'a, 'b> {
 
         let entry_point = self.get_function_entry(machine_number, GET_COLOR_OFFSET)?;
 
-        self.run(entry_point, stack)?;
+        self.run(machine_number, entry_point, stack)?;
 
         let Some(red) = stack.pop() else {
             return Err(MachineError::StackUnderFlow);
@@ -304,12 +305,13 @@ impl<'a, 'b> Program<'a, 'b> {
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let entry_point = self.get_function_entry(machine_number, function_number)?;
-        self.run(entry_point, stack)?;
+        self.run(machine_number, entry_point, stack)?;
         Ok(())
     }
 
     fn run<const STACK_SIZE: usize>(
         &mut self,
+        machine_number: Word,
         entry_point: usize,
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(), MachineError> {
@@ -467,6 +469,14 @@ impl<'a, 'b> Program<'a, 'b> {
                     continue;
                 }
                 Ops::Return => break,
+                Ops::Call => {
+                    let function_index = pop(stack)? as usize;
+                    let entry_point = self.get_function_entry(machine_number, function_index)?;
+                    let return_pc = next_pc(pc)?;
+                    self.run(machine_number, entry_point, stack)?;
+                    pc = return_pc;
+                    continue;
+                }
             }
             pc = next_pc(pc)?;
         }

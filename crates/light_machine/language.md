@@ -60,8 +60,8 @@ Mnemonics are case-insensitive in the assembler.
 The assembler should map these mnemonics to the current VM opcode table.
 If opcodes are added/removed, update this table and the assembler mapping.
 
-All instructions are 1 word unless noted. Some instructions take an immediate
-operand that is emitted as the next word in the program stream.
+All instructions are 1 word unless noted. For stack-based control flow, the
+assembler accepts an operand and expands it to `PUSH <operand>` + `<op>`.
 
 Stack ops:
 - `PUSH <word>`         ; Push immediate word (2 words total)
@@ -71,16 +71,17 @@ Globals ops:
 - `LOAD <addr>`         ; Push globals[addr] (2 words total)
 - `STORE <addr>`        ; Pop -> globals[addr] (2 words total)
 
-Static ops (reserved):
-- `LOAD_STATIC <addr>`  ; Push static_data[addr] (2 words total)
+Static ops:
+- `LOAD_STATIC`         ; Pop addr, push static_data[addr]
 
-Control flow (reserved):
-- `JUMP <addr>`         ; Jump to absolute word index (2 words total)
-- `BRLT <addr>`         ; Branch if a < b (2 words total)
-- `BRLTE <addr>`        ; Branch if a <= b (2 words total)
-- `BRGT <addr>`         ; Branch if a > b (2 words total)
-- `BRGTE <addr>`        ; Branch if a >= b (2 words total)
-- `BREQ <addr>`         ; Branch if a == b (2 words total)
+Control flow:
+- `JUMP`                ; Pop addr, jump to absolute word index
+- `CALL`                ; Pop function index, call function and return
+- `BRLT`                ; Pop addr and compare a < b
+- `BRLTE`               ; Pop addr and compare a <= b
+- `BRGT`                ; Pop addr and compare a > b
+- `BRGTE`               ; Pop addr and compare a >= b
+- `BREQ`                ; Pop addr and compare a == b
 - `RETURN`              ; Return from function
 
 Logic ops (reserved):
@@ -96,6 +97,10 @@ Only these are executed today:
 - `POP`: pop top of stack, error if empty.
 - `LOAD <addr>`: read globals[addr], push; error if addr out of range.
 - `STORE <addr>`: pop and store to globals[addr], error if empty/out of range.
+- `LOAD_STATIC`: pop addr, push static_data[addr].
+- `JUMP`: pop addr and jump.
+- `CALL`: pop function index, call function, resume after.
+- `BRLT`/`BRLTE`/`BRGT`/`BRGTE`/`BREQ`: pop addr and compare.
 - `RETURN`: return from function.
 
 Reserved instructions assemble but are not executed yet. Programs using them
@@ -152,7 +157,7 @@ Whitespace and comments can appear between any tokens.
     operand        = number | ident ;
 
     mnemonic       = "PUSH" | "POP" | "LOAD" | "STORE" | "LOAD_STATIC"
-                   | "JUMP" | "BRLT" | "BRLTE" | "BRGT" | "BRGTE" | "BREQ"
+                   | "JUMP" | "CALL" | "BRLT" | "BRLTE" | "BRGT" | "BRGTE" | "BREQ"
                    | "RETURN"
                    | "AND" | "OR" | "XOR" | "NOT"
                    | "BAND" | "BOR" | "BXOR" | "BNOT"

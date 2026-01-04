@@ -226,6 +226,29 @@ fn op_branch_less_than() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_branch_less_than_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 3",
+        "PUSH 2",
+        "BRLT target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[9]);
+    Ok(())
+}
+
+#[test]
 fn op_branch_less_than_eq() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
@@ -245,6 +268,29 @@ fn op_branch_less_than_eq() -> Result<(), MachineError> {
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_branch_less_than_eq_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 2",
+        "PUSH 1",
+        "BRLTE target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[9]);
     Ok(())
 }
 
@@ -272,6 +318,29 @@ fn op_branch_greater_than() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_branch_greater_than_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 2",
+        "PUSH 3",
+        "BRGT target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[9]);
+    Ok(())
+}
+
+#[test]
 fn op_branch_greater_than_eq() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
@@ -291,6 +360,29 @@ fn op_branch_greater_than_eq() -> Result<(), MachineError> {
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_branch_greater_than_eq_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "PUSH 2",
+        "BRGTE target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[9]);
     Ok(())
 }
 
@@ -318,6 +410,29 @@ fn op_branch_equal() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_branch_equal_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 5",
+        "PUSH 6",
+        "BREQ target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[9]);
+    Ok(())
+}
+
+#[test]
 fn op_and() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
@@ -333,6 +448,25 @@ fn op_and() -> Result<(), MachineError> {
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
+    Ok(())
+}
+
+#[test]
+fn op_and_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "PUSH 0",
+        "AND",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0]);
     Ok(())
 }
 
@@ -356,6 +490,25 @@ fn op_or() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_or_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0",
+        "PUSH 0",
+        "OR",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0]);
+    Ok(())
+}
+
+#[test]
 fn op_xor() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
@@ -375,6 +528,25 @@ fn op_xor() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_xor_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "PUSH 1",
+        "XOR",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0]);
+    Ok(())
+}
+
+#[test]
 fn op_not() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
@@ -389,6 +561,24 @@ fn op_not() -> Result<(), MachineError> {
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
+    Ok(())
+}
+
+#[test]
+fn op_not_false() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "NOT",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0]);
     Ok(())
 }
 
@@ -558,5 +748,39 @@ fn op_return() -> Result<(), MachineError> {
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
+    Ok(())
+}
+
+#[test]
+fn multi_function_calls() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 2",
+        ".func helper index 1",
+        "PUSH 77",
+        "RETURN",
+        ".end",
+        ".func main index 0",
+        "CALL helper",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+
+    {
+        let mut program = Program::new(program.as_slice(), &mut globals)?;
+        program.call(0, 0, &mut stack)?;
+    }
+    assert_eq!(stack.as_slice(), &[77]);
+
+    stack.clear();
+
+    {
+        let mut program = Program::new(program.as_slice(), &mut globals)?;
+        program.call(0, 1, &mut stack)?;
+    }
+    assert_eq!(stack.as_slice(), &[77]);
     Ok(())
 }
