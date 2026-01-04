@@ -31,7 +31,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::{Duration, with_timeout,};
 //use embassy_time::{Timer, Instant};
-use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver as UsbReceiver, Sender as UsbSender, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
 
@@ -41,6 +40,9 @@ use ch32_hal::usbd::Instance;
 
 use {ch32_hal as hal, panic_halt as _};
 
+mod vendor_class;
+
+use crate::vendor_class::{VendorClass, VendorReceiver, VendorSender};
 use crate::ws2812::Ws2812;
 use smart_leds::{brightness, SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
@@ -82,7 +84,6 @@ static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell:
 static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_BOS_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
-static USB_STATE: StaticCell<State> = StaticCell::new();
 static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
@@ -121,8 +122,6 @@ async fn main(spawner: Spawner) {
     let config_descriptor = USB_CONFIG_DESCRIPTOR.init([0; 256]);
     let bos_descriptor = USB_BOS_DESCRIPTOR.init([0; 256]);
     let control_buf = USB_CONTROL_BUF.init([0; 64]);
-    let state = USB_STATE.init(State::new());
-
     let mut builder = Builder::new(
         driver,
         config,
@@ -133,7 +132,7 @@ async fn main(spawner: Spawner) {
     );
 
     // Create classes on the builder.
-    let class = CdcAcmClass::new(&mut builder, state, 64);
+    let class = VendorClass::new(&mut builder, 64);
 
     // Build the builder.
     let usb = builder.build();
@@ -188,7 +187,7 @@ async fn usb_device_task(
 
 #[embassy_executor::task]
 async fn usb_rx_task(
-    mut receiver: UsbReceiver<'static, Driver<'static, peripherals::USBD>>,
+    mut receiver: VendorReceiver<'static, Driver<'static, peripherals::USBD>>,
     incoming: Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
 ) {
     loop {
@@ -199,7 +198,7 @@ async fn usb_rx_task(
 
 #[embassy_executor::task]
 async fn usb_tx_task(
-    mut sender: UsbSender<'static, Driver<'static, peripherals::USBD>>,
+    mut sender: VendorSender<'static, Driver<'static, peripherals::USBD>>,
     outgoing: Receiver<
         'static,
         CriticalSectionRawMutex,
@@ -291,7 +290,7 @@ async fn led_task(
     }
 }
 
-fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
+fn get_program(buffer: &mut [u16]) -> Result<usize, MachineBuilderError> {
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 2;
     let program_builder =
@@ -313,9 +312,10 @@ fn get_program(buffer: &mut [u16]) -> Result<(), MachineBuilderError> {
     function.add_op(Op::Exit)?;
     let (_function_index, machine) = function.finish()?;
 
-    let _program_builder = machine.finish()?;
+    let program_builder = machine.finish()?;
+    let descriptor = program_builder.finish_program();
 
-    Ok(())
+    Ok(descriptor.length)
 }
 
 struct Disconnected {}
@@ -330,7 +330,7 @@ impl From<EndpointError> for Disconnected {
 }
 
 async fn usb_receiver_loop<'d, T: Instance + 'd>(
-    receiver: &mut UsbReceiver<'d, Driver<'d, T>>,
+    receiver: &mut VendorReceiver<'d, Driver<'d, T>>,
     incoming: &Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
 ) -> Result<(), Disconnected> {
     let buf = USB_RECEIVE_BUF.init([0u8; 64]);
@@ -360,7 +360,7 @@ async fn usb_receiver_loop<'d, T: Instance + 'd>(
 }
 
 async fn usb_sender_loop<'d, T: Instance + 'd>(
-    sender: &mut UsbSender<'d, Driver<'d, T>>,
+    sender: &mut VendorSender<'d, Driver<'d, T>>,
     outgoing: &Receiver<
         'static,
         CriticalSectionRawMutex,
