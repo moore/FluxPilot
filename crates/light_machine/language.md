@@ -8,6 +8,7 @@ instruction set. The assembler should be a thin mapping from mnemonics
 to opcodes and word data.
 
 ## Design goals
+
 - Simple, line-oriented syntax.
 - Easy to add or rename opcodes in one table.
 - Minimal syntax sugar; keep it close to the VM's u16 word stream.
@@ -15,9 +16,11 @@ to opcodes and word data.
 - A clear place for globals size, machines, and functions.
 
 ## File structure
+
 A source file is a sequence of directives and instructions.
 
 Directives (top-level):
+
 - `.machine <name> globals <N> functions <M>`: starts a new machine.
 - `.func <name> [index <I>]`: starts a new function within the current machine.
 - `.func_decl <name> [index <I>]`: declares a function without a body.
@@ -25,6 +28,7 @@ Directives (top-level):
 - `.end`: ends the current machine, function, or data block.
 
 Notes:
+
 - `<N>` and `<M>` are u16 values.
 - `<name>` is currently informational; the assembler does not emit it.
 - `index <I>` is optional; if omitted, functions are assigned in order.
@@ -36,19 +40,24 @@ Notes:
   Inside `.data`, either use `.word <number>` or a bare `<number>` per line.
 
 ## Comments
+
 Use `;` for line comments.
 
 ## Numbers
+
 All numbers are u16 unless otherwise specified.
 Supported formats:
+
 - Decimal: `123`
 - Hex: `0x7B`
 
 ## Labels
+
 Labels end with `:` and can be referenced by name.
 Labels resolve to a word index within the current function or data block.
 
 ## Instruction syntax
+
 One instruction per line:
 
     <MNEMONIC> [operand]
@@ -57,6 +66,7 @@ Operands are u16 words or label references, depending on the opcode.
 Mnemonics are case-insensitive in the assembler.
 
 ## Instruction table
+
 The assembler should map these mnemonics to the current VM opcode table.
 If opcodes are added/removed, update this table and the assembler mapping.
 
@@ -64,19 +74,23 @@ All instructions are 1 word unless noted. For stack-based control flow, the
 assembler accepts an operand and expands it to `PUSH <operand>` + `<op>`.
 
 Stack ops:
+
 - `PUSH <word>`         ; Push immediate word (2 words total)
 - `POP`                 ; Pop and discard
 - `SLOAD <offset>`      ; Push stack[top - offset] (2 words total)
 - `SSTORE <offset>`     ; Store top at stack[top - offset] (2 words total)
 
 Globals ops:
+
 - `LOAD <addr>`         ; Push globals[addr] (2 words total)
 - `STORE <addr>`        ; Pop -> globals[addr] (2 words total)
 
 Static ops:
+
 - `LOAD_STATIC`         ; Pop addr, push static_data[addr]
 
 Control flow:
+
 - `JUMP`                ; Pop addr, jump to absolute word index
 - `CALL`                ; Pop function index, call function and return
 - `BRLT`                ; Pop addr and compare a < b
@@ -87,14 +101,18 @@ Control flow:
 - `RETURN`              ; Return from function
 
 Logic ops (reserved):
+
 - `AND` `OR` `XOR` `NOT` ; Logical ops on top-of-stack values
 - `BAND` `BOR` `BXOR` `BNOT`   ; Bitwise forms
 
 Arithmetic ops (reserved):
+
 - `ADD` `SUB` `MUL` `DIV`      ; Arithmetic on top-of-stack values
 
 ## Semantics (current runtime)
+
 Only these are executed today:
+
 - `PUSH <word>`: push immediate.
 - `POP`: pop top of stack, error if empty.
 - `LOAD <addr>`: read globals[addr], push; error if addr out of range.
@@ -111,6 +129,7 @@ Reserved instructions assemble but are not executed yet. Programs using them
 should be treated as "future programs" and may error at runtime.
 
 ## Program layout (informative)
+
 The binary program is a `u16` array structured as:
 
     [machine_count][globals_size][machine_table...][machines...]
@@ -119,6 +138,7 @@ This document does not require authors to manually build the header; the
 assembler should emit a valid header based on `.machine` and `.func` blocks.
 
 ## Example
+
 This example mirrors the test program used in code:
 
     .machine main globals 3 functions 2
@@ -140,6 +160,7 @@ This example mirrors the test program used in code:
     .end
 
 ## Grammar (EBNF)
+
 This is a minimal grammar suitable for a hand-written parser.
 Whitespace and comments can appear between any tokens.
 
@@ -180,7 +201,8 @@ Whitespace and comments can appear between any tokens.
                    | "A" | "B" | "C" | "D" | "E" | "F" ;
     letter         = "A" ... "Z" | "a" ... "z" ;
 
-## Parsing notes
+## Parsing
+
 - The parser should track the current machine/function/data block.
 - A `.func_decl` defines the function name/index without emitting code.
 - A `.func` must either define a new function or provide the body for a previous
@@ -193,6 +215,7 @@ Whitespace and comments can appear between any tokens.
   `.word` or bare numeric values.
 
 ## Future extensions (placeholders)
+
 - `.const` for named single-word constants.
 - `.include` for file inclusion.
 - `.assert` for assembly-time checks.
