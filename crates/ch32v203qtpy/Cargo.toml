@@ -25,6 +25,7 @@ embassy-executor = { version = "0.7.0", features = [
     #"arch-riscv32",
     "arch-spin", # TODO: Required for USBD to connect properly
     "executor-thread",
+    "nightly",
 ] }
 
 embassy-time = { version = "0.4.0" }

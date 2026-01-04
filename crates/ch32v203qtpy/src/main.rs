@@ -87,6 +87,7 @@ static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(spawner: Spawner) {
+    #[cfg(debug_assertions)]
     hal::debug::SDIPrint::enable();
     let config = hal::Config{ rcc: hal::rcc::Config::SYSCLK_FREQ_144MHZ_HSI, ..Default::default() };
     let p = hal::init(config);

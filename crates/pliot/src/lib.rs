@@ -39,6 +39,16 @@ pub enum StorageError {
 }
 pub struct ProgramNumber(pub(crate) usize);
 
+impl ProgramNumber {
+    pub fn new(number: usize) -> Self{
+        ProgramNumber(number)
+    }
+
+    pub fn value(&self) -> usize {
+        self.0
+    }
+}
+
 pub trait Storage {
     type L: Sized;
 

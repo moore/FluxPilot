@@ -9,6 +9,11 @@ MEMORY
 
 SECTIONS
 {
+    /* Reserve the tail of FLASH1 for flash-backed storage. */
+    __storage_size = 128K;
+    __storage_start = ORIGIN(FLASH1) + LENGTH(FLASH1) - __storage_size;
+    __storage_end = ORIGIN(FLASH1) + LENGTH(FLASH1);
+
     .coldtext :
     {
         . = ALIGN(4);
@@ -16,12 +21,18 @@ SECTIONS
         . = ALIGN(4);
     } >FLASH1 AT>FLASH1
 
-	.coldrodata :
-	{
-		. = ALIGN(4);
-		KEEP(*(SORT_NONE(.coldrodata .coldrodata.*)))
-		. = ALIGN(4);
-	} >FLASH1 AT>FLASH1
+    .coldrodata :
+    {
+        . = ALIGN(4);
+        KEEP(*(SORT_NONE(.coldrodata .coldrodata.*)))
+        . = ALIGN(4);
+    } >FLASH1 AT>FLASH1
+
+    .storage (NOLOAD) :
+    {
+        . = __storage_start;
+        . += __storage_size;
+    } >FLASH1
 }
 
 REGION_ALIAS("REGION_TEXT", FLASH);

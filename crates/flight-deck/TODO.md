@@ -9,7 +9,7 @@
  4. ~~Implment js API to get default program.~~
  5. ~~Implment js API to load program.~~
  6. ~~Implment program loding on board.~~
- 7. Implment js program builder API.
+ 7. ~~Implment js program builder API.~~
  8. Implment program storage on board.
 
 ## Later
