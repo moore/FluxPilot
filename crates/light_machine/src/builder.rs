@@ -188,6 +188,18 @@ pub struct MachineBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COU
 impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
 {
+    pub fn program_free(&self) -> Word {
+        self.program.free
+    }
+
+    fn patch_word(&mut self, index: Word, value: Word) -> Result<(), MachineBuilderError> {
+        let index = usize::from(index);
+        let Some(slot) = self.program.buffer.get_mut(index) else {
+            return Err(MachineBuilderError::BufferTooSmall);
+        };
+        *slot = value;
+        Ok(())
+    }
     pub fn new(
         mut program: ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
         function_count: Word,
@@ -293,13 +305,13 @@ pub enum Op {
     Pop,
     Load(Word),
     Store(Word),
-    LoadStatic(Word),
-    Jump(Word),
-    BranchLessThan(Word),
-    BranchLessThanEq(Word),
-    BranchGreaterThan(Word),
-    BranchGreaterThanEq(Word),
-    BranchEqual(Word),
+    LoadStatic,
+    Jump,
+    BranchLessThan,
+    BranchLessThanEq,
+    BranchGreaterThan,
+    BranchGreaterThanEq,
+    BranchEqual,
     And,
     Or,
     Xor,
@@ -336,6 +348,14 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         }
     }
 
+    pub fn function_start(&self) -> Word {
+        self.function_start
+    }
+
+    pub fn patch_word(&mut self, index: Word, value: Word) -> Result<(), MachineBuilderError> {
+        self.machine.patch_word(index, value)
+    }
+
     pub fn add_op(&mut self, op: Op) -> Result<(), MachineBuilderError> {
         match op {
             Op::Push(value) => {
@@ -359,33 +379,26 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
                 self.machine.add_word(Ops::Store.into())?;
                 self.machine.add_word(address)?;
             }
-            Op::LoadStatic(address) => {
+            Op::LoadStatic => {
                 self.machine.add_word(Ops::LoadStatic.into())?;
-                self.machine.add_word(address)?;
             }
-            Op::Jump(address) => {
+            Op::Jump => {
                 self.machine.add_word(Ops::Jump.into())?;
-                self.machine.add_word(address)?;
             }
-            Op::BranchLessThan(address) => {
+            Op::BranchLessThan => {
                 self.machine.add_word(Ops::BranchLessThan.into())?;
-                self.machine.add_word(address)?;
             }
-            Op::BranchLessThanEq(address) => {
+            Op::BranchLessThanEq => {
                 self.machine.add_word(Ops::BranchLessThanEq.into())?;
-                self.machine.add_word(address)?;
             }
-            Op::BranchGreaterThan(address) => {
+            Op::BranchGreaterThan => {
                 self.machine.add_word(Ops::BranchGreaterThan.into())?;
-                self.machine.add_word(address)?;
             }
-            Op::BranchGreaterThanEq(address) => {
+            Op::BranchGreaterThanEq => {
                 self.machine.add_word(Ops::BranchGreaterThanEq.into())?;
-                self.machine.add_word(address)?;
             }
-            Op::BranchEqual(address) => {
+            Op::BranchEqual => {
                 self.machine.add_word(Ops::BranchEqual.into())?;
-                self.machine.add_word(address)?;
             }
             Op::And => {
                 self.machine.add_word(Ops::And.into())?;
@@ -415,7 +428,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
                 self.machine.add_word(Ops::Multiply.into())?;
             }
             Op::Devide => {
-                self.machine.add_word(Ops::Devide.into())?;
+                self.machine.add_word(Ops::Divide.into())?;
             }
             Op::Add => {
                 self.machine.add_word(Ops::Add.into())?;

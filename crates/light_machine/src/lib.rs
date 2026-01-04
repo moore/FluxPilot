@@ -86,7 +86,7 @@ pub enum Ops {
     BitwiseXor,
     BitwiseNot,
     Multiply,
-    Devide,
+    Divide,
     Add,
     Subtract,
     Load,
@@ -327,27 +327,103 @@ impl<'a, 'b> Program<'a, 'b> {
                 Ops::Push => {
                     pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
-                    if stack.push(word).is_err() {
-                        return Err(MachineError::StackOverflow);
+                    push(stack, word)?;
+                }
+                Ops::BranchLessThan => {
+                    let target = pop(stack)? as usize;
+                    let (lhs, rhs) = pop2(stack)?;
+                    if lhs < rhs {
+                        pc = target;
+                        continue;
                     }
                 }
-                Ops::BranchLessThan => (),
-                Ops::BranchLessThanEq => (),
-                Ops::BranchGreaterThan => (),
-                Ops::BranchGreaterThanEq => (),
-                Ops::BranchEqual => (),
-                Ops::And => (),
-                Ops::Or => (),
-                Ops::Xor => (),
-                Ops::Not => (),
-                Ops::BitwiseAnd => (),
-                Ops::BitwiseOr => (),
-                Ops::BitwiseXor => (),
-                Ops::BitwiseNot => (),
-                Ops::Multiply => (),
-                Ops::Devide => (),
-                Ops::Add => (),
-                Ops::Subtract => (),
+                Ops::BranchLessThanEq => {
+                    let target = pop(stack)? as usize;
+                    let (lhs, rhs) = pop2(stack)?;
+                    if lhs <= rhs {
+                        pc = target;
+                        continue;
+                    }
+                }
+                Ops::BranchGreaterThan => {
+                    let target = pop(stack)? as usize;
+                    let (lhs, rhs) = pop2(stack)?;
+                    if lhs > rhs {
+                        pc = target;
+                        continue;
+                    }
+                }
+                Ops::BranchGreaterThanEq => {
+                    let target = pop(stack)? as usize;
+                    let (lhs, rhs) = pop2(stack)?;
+                    if lhs >= rhs {
+                        pc = target;
+                        continue;
+                    }
+                }
+                Ops::BranchEqual => {
+                    let target = pop(stack)? as usize;
+                    let (lhs, rhs) = pop2(stack)?;
+                    if lhs == rhs {
+                        pc = target;
+                        continue;
+                    }
+                }
+                Ops::And => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    let result = if lhs != 0 && rhs != 0 { 1 } else { 0 };
+                    push(stack, result)?;
+                }
+                Ops::Or => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    let result = if lhs != 0 || rhs != 0 { 1 } else { 0 };
+                    push(stack, result)?;
+                }
+                Ops::Xor => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    let result = if (lhs != 0) ^ (rhs != 0) { 1 } else { 0 };
+                    push(stack, result)?;
+                }
+                Ops::Not => {
+                    let value = pop(stack)?;
+                    let result = if value == 0 { 1 } else { 0 };
+                    push(stack, result)?;
+                }
+                Ops::BitwiseAnd => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    push(stack, lhs & rhs)?;
+                }
+                Ops::BitwiseOr => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    push(stack, lhs | rhs)?;
+                }
+                Ops::BitwiseXor => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    push(stack, lhs ^ rhs)?;
+                }
+                Ops::BitwiseNot => {
+                    let value = pop(stack)?;
+                    push(stack, !value)?;
+                }
+                Ops::Multiply => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    push(stack, lhs.wrapping_mul(rhs))?;
+                }
+                Ops::Divide => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    let result = lhs
+                        .checked_div(rhs)
+                        .ok_or(MachineError::InvalidOp(word))?;
+                    push(stack, result)?;
+                }
+                Ops::Add => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    push(stack, lhs.wrapping_add(rhs))?;
+                }
+                Ops::Subtract => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    push(stack, lhs.wrapping_sub(rhs))?;
+                }
                 Ops::Load => {
                     pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
@@ -360,9 +436,7 @@ impl<'a, 'b> Program<'a, 'b> {
 
                     let word = read_global(index, self.globals)?;
 
-                    if stack.push(word).is_err() {
-                        return Err(MachineError::StackOverflow);
-                    }
+                    push(stack, word)?;
                 }
                 Ops::Store => {
                     pc = next_pc(pc)?;
@@ -374,9 +448,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     // SAFTY: const assersion prouves this is safe
                     let index = word as usize;
 
-                    let Some(word) = stack.pop() else {
-                        return Err(MachineError::StackUnderFlow);
-                    };
+                    let word = pop(stack)?;
 
                     set_value(
                         self.globals,
@@ -385,8 +457,15 @@ impl<'a, 'b> Program<'a, 'b> {
                         MachineError::OutOfBoundsGlobalsAccess(index),
                     )?;
                 }
-                Ops::LoadStatic => (),
-                Ops::Jump => (),
+                Ops::LoadStatic => {
+                    let addr = pop(stack)? as usize;
+                    let value = read_static(addr, self.static_data)?;
+                    push(stack, value)?;
+                }
+                Ops::Jump => {
+                    pc = pop(stack)? as usize;
+                    continue;
+                }
                 Ops::Return => break,
             }
             pc = next_pc(pc)?;
@@ -413,6 +492,30 @@ fn read_global(index: usize, globals: &[Word]) -> Result<Word, MachineError> {
         None => Err(MachineError::OutOfBoundsGlobalsAccess(index)),
         Some(word) => Ok(*word),
     }
+}
+
+fn pop<const STACK_SIZE: usize>(
+    stack: &mut Vec<Word, STACK_SIZE>,
+) -> Result<Word, MachineError> {
+    stack.pop().ok_or(MachineError::StackUnderFlow)
+}
+
+fn pop2<const STACK_SIZE: usize>(
+    stack: &mut Vec<Word, STACK_SIZE>,
+) -> Result<(Word, Word), MachineError> {
+    let rhs = pop(stack)?;
+    let lhs = pop(stack)?;
+    Ok((lhs, rhs))
+}
+
+fn push<const STACK_SIZE: usize>(
+    stack: &mut Vec<Word, STACK_SIZE>,
+    value: Word,
+) -> Result<(), MachineError> {
+    if stack.push(value).is_err() {
+        return Err(MachineError::StackOverflow);
+    }
+    Ok(())
 }
 
 fn word_to_color(word: Word) -> Result<u8, MachineError> {

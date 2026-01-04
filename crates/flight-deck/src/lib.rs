@@ -125,6 +125,12 @@ impl ProgramDescriptorJs {
     }
 }
 
+impl Default for FlightDeck {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 
 #[wasm_bindgen]
 impl FlightDeck {
@@ -159,10 +165,7 @@ impl FlightDeck {
         let bytes = message_buf.as_slice();
         send(bytes);
 
-        let request_id = match message.get_request_id() {
-            None => None,
-            Some(id) => Some(id.value())
-        };
+        let request_id = message.get_request_id().map(|id| id.value());
 
         Ok(request_id)
     }
@@ -212,8 +215,8 @@ impl FlightDeck {
         }
 
         let program = &program[..length];
-        let mut loader = self.controler.get_program_loader(program);
-        while let Some(message) = loader.next() {
+        let loader = self.controler.get_program_loader(program);
+        for message in loader {
             let message_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
             send(message_buf.as_slice());
         }
@@ -229,9 +232,10 @@ const fn error_code(error_type: &ErrorType) -> u32 {
         ErrorType::UnknownMachine(_) => 3,
         ErrorType::UnknownFucntion(_) => 4,
         ErrorType::UnexpectedMessageType(_) => 5,
-        ErrorType::ProgramTooLarge => 6,
-        ErrorType::InvalidProgram => 7,
-        ErrorType::UnknownProgram => 8,
+        ErrorType::InvalidMessage => 6,
+        ErrorType::ProgramTooLarge => 7,
+        ErrorType::InvalidProgram => 8,
+        ErrorType::UnknownProgram => 9,
     }
 }
 
@@ -244,6 +248,7 @@ fn error_message(error_type: &ErrorType) -> String {
         ErrorType::UnexpectedMessageType(message_type) => {
             format!("unexpected message type {}", message_type_name(message_type))
         }
+        ErrorType::InvalidMessage => "invalid message (too large or corrupted)".to_string(),
         ErrorType::ProgramTooLarge => "program too large".to_string(),
         ErrorType::InvalidProgram => "invalid program".to_string(),
         ErrorType::UnknownProgram => "unknown program".to_string(),
@@ -281,14 +286,10 @@ pub fn compile_program(source: &str, buffer: &mut [u16]) -> Result<ProgramDescri
     > = Assembler::new(builder);
 
     for line in source.lines() {
-        assembler
-            .add_line(line)
-            .map_err(|err| assembler_error_to_js(err))?;
+        assembler.add_line(line).map_err(assembler_error_to_js)?;
     }
 
-    let descriptor = assembler
-        .finish()
-        .map_err(|err| assembler_error_to_js(err))?;
+    let descriptor = assembler.finish().map_err(assembler_error_to_js)?;
     Ok(ProgramDescriptorJs::from_descriptor(descriptor))
 }
 

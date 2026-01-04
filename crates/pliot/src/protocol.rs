@@ -44,6 +44,7 @@ pub enum ErrorType {
     UnknownMachine(u32),
     UnknownFucntion(u32),
     UnexpectedMessageType(MessageType),
+    InvalidMessage,
     ProgramTooLarge,
     InvalidProgram,
     UnknownProgram,

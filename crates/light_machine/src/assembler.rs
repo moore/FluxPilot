@@ -80,6 +80,11 @@ struct Label {
     offset: Word,
 }
 
+struct Fixup {
+    name: String<NAME_CAP>,
+    at: Word,
+}
+
 struct FuncEntry {
     name: String<NAME_CAP>,
     index: Word,
@@ -99,9 +104,12 @@ pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MA
     function: Option<FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>>,
     block: BlockKind,
     labels: Vec<Label, LABEL_CAP>,
+    static_labels: Vec<Label, LABEL_CAP>,
+    fixups: Vec<Fixup, LABEL_CAP>,
     funcs: Vec<FuncEntry, FUNCTION_COUNT_MAX>,
     data: Vec<Word, DATA_CAP>,
     cursor: Word,
+    function_base: Word,
     next_function_index: Word,
     function_count: Word,
     line_number: u32,
@@ -117,9 +125,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             function: None,
             block: BlockKind::None,
             labels: Vec::new(),
+            static_labels: Vec::new(),
+            fixups: Vec::new(),
             funcs: Vec::new(),
             data: Vec::new(),
             cursor: 0,
+            function_base: 0,
             next_function_index: 0,
             function_count: 0,
             line_number: 0,
@@ -163,6 +174,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 .map_err(|err| err.with_line(line_number));
         }
 
+        if matches!(self.block, BlockKind::Data) && first != ".end" {
+            return self
+                .handle_data_line(&tokens)
+                .map_err(|err| err.with_line(line_number));
+        }
+
         // Directives always start with '.' to avoid ambiguity with mnemonics.
         if first.starts_with('.') {
             return self
@@ -193,11 +210,16 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         if self.labels.iter().any(|label| label.name == name) {
             return Err(AssemblerError::Kind(AssemblerErrorKind::DuplicateLabel));
         }
+        let offset = match self.block {
+            BlockKind::Function => self
+                .function_base
+                .checked_add(self.cursor)
+                .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?,
+            BlockKind::Data => self.cursor,
+            _ => self.cursor,
+        };
         self.labels
-            .push(Label {
-                name,
-                offset: self.cursor,
-            })
+            .push(Label { name, offset })
             .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
         Ok(())
     }
@@ -232,6 +254,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         let function_count = parse_word(tokens.get(5).ok_or(AssemblerError::Kind(
             AssemblerErrorKind::InvalidDirective,
         ))?)?;
+        self.labels.clear();
+        self.static_labels.clear();
+        self.fixups.clear();
+        self.cursor = 0;
         self.function_count = function_count;
         self.next_function_index = 0;
         self.funcs.clear();
@@ -277,12 +303,14 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         self.mark_function_defined(&name, index)?;
 
         self.labels.clear();
+        self.fixups.clear();
         self.cursor = 0;
         let machine = self
             .machine
             .take()
             .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingMachine))?;
         let function = machine.new_function_at_index(FunctionIndex::new(index))?;
+        self.function_base = function.function_start();
         self.function = Some(function);
         self.block = BlockKind::Function;
         Ok(())
@@ -352,6 +380,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                     .function
                     .take()
                     .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                let function = self.resolve_fixups(function)?;
                 let (_index, machine) = function.finish()?;
                 self.machine = Some(machine);
                 self.block = BlockKind::Machine;
@@ -362,10 +391,23 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                     .machine
                     .as_mut()
                     .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingMachine))?;
+                let data_base = machine.program_free();
+                for label in self.labels.iter() {
+                    let absolute = data_base
+                        .checked_add(label.offset)
+                        .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+                    self.static_labels
+                        .push(Label {
+                            name: label.name.clone(),
+                            offset: absolute,
+                        })
+                        .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
+                }
                 if !self.data.is_empty() {
                     let _ = machine.add_static(self.data.as_slice())?;
                 }
                 self.data.clear();
+                self.labels.clear();
                 self.block = BlockKind::Machine;
                 Ok(())
             }
@@ -427,17 +469,71 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
     }
 
     fn handle_function_instruction(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
-        let function = self
-            .function
-            .as_mut()
-            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
-        let op = parse_op(tokens, &self.labels)?;
-        self.cursor = self
-            .cursor
-            .checked_add(op_word_len(&op))
-            .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
-        function.add_op(op)?;
-        Ok(())
+        let mnemonic = tokens.first().copied().ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidInstruction,
+        ))?;
+        match mnemonic {
+            "LOAD_STATIC" | "load_static" => self.emit_stack_target(tokens, Op::LoadStatic),
+            "JUMP" | "jump" => self.emit_stack_target(tokens, Op::Jump),
+            "BRLT" | "brlt" => self.emit_stack_target(tokens, Op::BranchLessThan),
+            "BRLTE" | "brlte" => self.emit_stack_target(tokens, Op::BranchLessThanEq),
+            "BRGT" | "brgt" => self.emit_stack_target(tokens, Op::BranchGreaterThan),
+            "BRGTE" | "brgte" => self.emit_stack_target(tokens, Op::BranchGreaterThanEq),
+            "BREQ" | "breq" => self.emit_stack_target(tokens, Op::BranchEqual),
+            _ => {
+                let (op, width) = self.parse_op(tokens)?;
+                if width == 0 {
+                    return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction));
+                }
+                self.cursor = self
+                    .cursor
+                    .checked_add(width)
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+                let function = self
+                    .function
+                    .as_mut()
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                function.add_op(op)?;
+                Ok(())
+            }
+        }
+    }
+
+    fn emit_stack_target(&mut self, tokens: &[&str], op: Op) -> Result<(), AssemblerError> {
+        match tokens.len() {
+            1 => {
+                let function = self
+                    .function
+                    .as_mut()
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                self.cursor = self
+                    .cursor
+                    .checked_add(1)
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+                function.add_op(op)?;
+                Ok(())
+            }
+            2 => {
+                let operand_token = tokens.get(1).copied().ok_or(AssemblerError::Kind(
+                    AssemblerErrorKind::InvalidInstruction,
+                ))?;
+                let operand = self
+                    .resolve_operand(operand_token)?
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction))?;
+                let function = self
+                    .function
+                    .as_mut()
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                self.cursor = self
+                    .cursor
+                    .checked_add(3)
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+                function.add_op(Op::Push(operand))?;
+                function.add_op(op)?;
+                Ok(())
+            }
+            _ => Err(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction)),
+        }
     }
 
     fn next_free_function_index(&mut self) -> Result<Word, AssemblerError> {
@@ -478,66 +574,111 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             })
             .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxFunctionsExceeded))
     }
-}
 
-
-
-fn parse_op<const LABEL_CAP: usize>(tokens: &[&str], labels: &Vec<Label, LABEL_CAP>) -> Result<Op, AssemblerError> {
-    let mnemonic = tokens.first().copied().ok_or(AssemblerError::Kind(
-        AssemblerErrorKind::InvalidInstruction,
-    ))?;
-    let operand = if tokens.len() > 1 {
-        Some(parse_operand(tokens.get(1).copied().ok_or(
-            AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction),
-        )?, labels)?)
-    } else {
-        None
-    };
-
-    match mnemonic {
-        "PUSH" | "push" => Ok(Op::Push(require_operand(operand)?)),
-        "POP" | "pop" => Ok(Op::Pop),
-        "LOAD" | "load" => Ok(Op::Load(require_operand(operand)?)),
-        "STORE" | "store" => Ok(Op::Store(require_operand(operand)?)),
-        "LOAD_STATIC" | "load_static" => Ok(Op::LoadStatic(require_operand(operand)?)),
-        "JUMP" | "jump" => Ok(Op::Jump(require_operand(operand)?)),
-        "BRLT" | "brlt" => Ok(Op::BranchLessThan(require_operand(operand)?)),
-        "BRLTE" | "brlte" => Ok(Op::BranchLessThanEq(require_operand(operand)?)),
-        "BRGT" | "brgt" => Ok(Op::BranchGreaterThan(require_operand(operand)?)),
-        "BRGTE" | "brgte" => Ok(Op::BranchGreaterThanEq(require_operand(operand)?)),
-        "BREQ" | "breq" => Ok(Op::BranchEqual(require_operand(operand)?)),
-        "RETURN" | "return" => Ok(Op::Return),
-        "AND" | "and" => Ok(Op::And),
-        "OR" | "or" => Ok(Op::Or),
-        "XOR" | "xor" => Ok(Op::Xor),
-        "NOT" | "not" => Ok(Op::Not),
-        "BAND" | "band" => Ok(Op::BitwiseAnd),
-        "BOR" | "bor" => Ok(Op::BitwiseOr),
-        "BXOR" | "bxor" => Ok(Op::BitwiseXor),
-        "BNOT" | "bnot" => Ok(Op::BitwiseNot),
-        "ADD" | "add" => Ok(Op::Add),
-        "SUB" | "sub" => Ok(Op::Subtract),
-        "MUL" | "mul" => Ok(Op::Multiply),
-        "DIV" | "div" => Ok(Op::Devide),
-        _ => Err(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction)),
-    }
-}
-
-fn parse_operand<const LABEL_CAP: usize>(token: &str, labels: &Vec<Label, LABEL_CAP>) -> Result<Word, AssemblerError> {
-    if let Ok(value) = parse_word(token) {
-        return Ok(value);
-    }
-    let name = to_name(token)?;
-    for label in labels.iter() {
-        if label.name == name {
-            return Ok(label.offset);
+    fn resolve_fixups(
+        &mut self,
+        mut function: FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
+    ) -> Result<FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, AssemblerError> {
+        while let Some(fixup) = self.fixups.pop() {
+            let label = self
+                .labels
+                .iter()
+                .find(|label| label.name == fixup.name)
+                .ok_or(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))?;
+            function.patch_word(fixup.at, label.offset)?;
         }
+        Ok(function)
     }
-    Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
-}
 
-fn require_operand(value: Option<Word>) -> Result<Word, AssemblerError> {
-    value.ok_or(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction))
+    fn parse_op(&mut self, tokens: &[&str]) -> Result<(Op, Word), AssemblerError> {
+        let mnemonic = tokens.first().copied().ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidInstruction,
+        ))?;
+        let operand_token = tokens.get(1).copied();
+        let expects_operand = matches!(
+            mnemonic,
+            "PUSH"
+                | "push"
+                | "LOAD"
+                | "load"
+                | "STORE"
+                | "store"
+        );
+
+        let operand = if expects_operand {
+            let token = operand_token.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?;
+            self.resolve_operand(token)?
+        } else {
+            None
+        };
+
+        let op = match mnemonic {
+            "PUSH" | "push" => Op::Push(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
+            "POP" | "pop" => Op::Pop,
+            "LOAD" | "load" => Op::Load(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
+            "STORE" | "store" => Op::Store(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
+            "LOAD_STATIC" | "load_static" => Op::LoadStatic,
+            "JUMP" | "jump" => Op::Jump,
+            "BRLT" | "brlt" => Op::BranchLessThan,
+            "BRLTE" | "brlte" => Op::BranchLessThanEq,
+            "BRGT" | "brgt" => Op::BranchGreaterThan,
+            "BRGTE" | "brgte" => Op::BranchGreaterThanEq,
+            "BREQ" | "breq" => Op::BranchEqual,
+            "RETURN" | "return" => Op::Return,
+            "AND" | "and" => Op::And,
+            "OR" | "or" => Op::Or,
+            "XOR" | "xor" => Op::Xor,
+            "NOT" | "not" => Op::Not,
+            "BAND" | "band" => Op::BitwiseAnd,
+            "BOR" | "bor" => Op::BitwiseOr,
+            "BXOR" | "bxor" => Op::BitwiseXor,
+            "BNOT" | "bnot" => Op::BitwiseNot,
+            "ADD" | "add" => Op::Add,
+            "SUB" | "sub" => Op::Subtract,
+            "MUL" | "mul" => Op::Multiply,
+            "DIV" | "div" => Op::Devide,
+            _ => return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction)),
+        };
+
+        let width = if expects_operand { 2 } else { 1 };
+        Ok((op, width))
+    }
+
+    fn resolve_operand(&mut self, token: &str) -> Result<Option<Word>, AssemblerError> {
+        if let Ok(value) = parse_word(token) {
+            return Ok(Some(value));
+        }
+
+        let name = to_name(token)?;
+        if let Some(label) = self.labels.iter().find(|label| label.name == name) {
+            return Ok(Some(label.offset));
+        }
+        if let Some(label) = self.static_labels.iter().find(|label| label.name == name) {
+            return Ok(Some(label.offset));
+        }
+
+        if matches!(self.block, BlockKind::Function) {
+            let at = self
+                .function_base
+                .checked_add(self.cursor)
+                .and_then(|base| base.checked_add(1))
+                .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+            self.fixups
+                .push(Fixup { name, at })
+                .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
+            return Ok(Some(0));
+        }
+
+        Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
+    }
 }
 
 fn parse_word(token: &str) -> Result<Word, AssemblerError> {
@@ -564,20 +705,4 @@ fn to_name(name: &str) -> Result<String<NAME_CAP>, AssemblerError> {
     out.push_str(name)
         .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::NameTooLong))?;
     Ok(out)
-}
-
-fn op_word_len(op: &Op) -> Word {
-    match op {
-        Op::Push(_)
-        | Op::Load(_)
-        | Op::Store(_)
-        | Op::LoadStatic(_)
-        | Op::Jump(_)
-        | Op::BranchLessThan(_)
-        | Op::BranchLessThanEq(_)
-        | Op::BranchGreaterThan(_)
-        | Op::BranchGreaterThanEq(_)
-        | Op::BranchEqual(_) => 2,
-        _ => 1,
-    }
 }

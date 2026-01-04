@@ -46,10 +46,9 @@ use ws2812_spi as ws2812;
 
 use light_machine::{
     builder::{MachineBuilderError, Op, ProgramBuilder},
-    Program, Word,
+    Word,
 };
-use pliot::{Pliot, protocol::{ErrorType, Protocol}, meme_storage::MemStorage};
-use postcard::from_bytes_cobs;
+use pliot::{Pliot, meme_storage::MemStorage};
 
 use heapless::Vec;
 use static_cell::StaticCell;
@@ -65,8 +64,6 @@ const INCOMING_MESSAGE_CAP: usize = 128;
 const OUTGOING_MESSAGE_CAP: usize = 128;
 const OUTGOING_QUEUE_DEPTH: usize = 1;
 const NUM_LEDS: usize = 25;
-
-type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 
 static CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>> = StaticCell::new();
 static OUTGOING_CHANNEL: StaticCell<Channel<
@@ -90,8 +87,7 @@ static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
 #[embassy_executor::main(entry = "qingke_rt::entry")]
 async fn main(spawner: Spawner) {
     hal::debug::SDIPrint::enable();
-    let mut config = hal::Config::default();
-    config.rcc = hal::rcc::Config::SYSCLK_FREQ_144MHZ_HSI;
+    let config = hal::Config{ rcc: hal::rcc::Config::SYSCLK_FREQ_144MHZ_HSI, ..Default::default() };
     let p = hal::init(config);
 
     let usb = p.USBD;

@@ -1,51 +1,66 @@
 use super::*;
-use builder::*;
+use crate::assembler::Assembler;
+use crate::builder::ProgramBuilder;
 
 extern crate std;
 use std::println;
+use std::vec::Vec as StdVec;
+
+const STACK_CAP: usize = 32;
+const ASM_MACHINE_MAX: usize = 1;
+const ASM_FUNCTION_MAX: usize = 8;
+const ASM_LABEL_CAP: usize = 32;
+const ASM_DATA_CAP: usize = 64;
+
+fn assemble_program(lines: &[&str]) -> StdVec<Word> {
+    let mut buffer = [0u16; 256];
+    let builder =
+        ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(&mut buffer, 1).unwrap();
+    let mut asm: Assembler<ASM_MACHINE_MAX, ASM_FUNCTION_MAX, ASM_LABEL_CAP, ASM_DATA_CAP> =
+        Assembler::new(builder);
+    for line in lines {
+        asm.add_line(line).unwrap();
+    }
+    let descriptor = asm.finish().unwrap();
+    buffer[..descriptor.length].to_vec()
+}
+
+fn run_single(
+    program: &[Word],
+    globals: &mut [Word],
+    stack: &mut Vec<Word, STACK_CAP>,
+) -> Result<(), MachineError> {
+    let mut program = Program::new(program, globals)?;
+    program.call(0, 0, stack)
+}
 
 #[test]
 fn test_init_get_color() -> Result<(), MachineError> {
-    let mut buffer = [0u16; 30];
-    const MACHINE_COUNT: usize = 1;
-    const FUNCTION_COUNT: usize = 2;
-    let program_builder =
-        ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as u16)
-            .expect("could not get machine builder");
+    let program = assemble_program(&[
+        ".machine main globals 3 functions 2",
+        ".func set_rgb index 0",
+        "STORE 0",
+        "STORE 1",
+        "STORE 2",
+        "RETURN",
+        ".end",
+        ".func get_rgb index 1",
+        "LOAD 0",
+        "LOAD 1",
+        "LOAD 2",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
 
-    let globals_size = 3;
-    let machine = program_builder
-        .new_machine(FUNCTION_COUNT as u16, globals_size)
-        .expect("could not get new machine");
-
-    let mut function = machine
-        .new_function()
-        .expect("could not get fucntion builder");
-    function.add_op(Op::Store(0)).expect("could not add op");
-    function.add_op(Op::Store(1)).expect("could not add op");
-    function.add_op(Op::Store(2)).expect("could not add op");
-    function.add_op(Op::Return).expect("could not add op");
-    let (_function_index, machine) = function.finish().expect("could not finish function");
-
-    let mut function = machine
-        .new_function()
-        .expect("could not get fucntion builder");
-    function.add_op(Op::Load(0)).expect("could not add op");
-    function.add_op(Op::Load(1)).expect("could not add op");
-    function.add_op(Op::Load(2)).expect("could not add op");
-    function.add_op(Op::Return).expect("could not add op");
-    let (_function_index, machine) = function.finish().expect("Could not finish function");
-
-    let _program_builder = machine.finish();
-
-    println!("program {:?}", buffer);
+    println!("program {:?}", program);
 
     let mut globals = [0u16; 10];
     let (red, green, blue) = (17, 23, 31);
     let mut stack: Vec<Word, 100> = Vec::new();
 
     {
-        let mut program = Program::new(buffer.as_slice(), globals.as_mut_slice())?;
+        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
 
         stack.push(red).unwrap();
         stack.push(green).unwrap();
@@ -57,7 +72,7 @@ fn test_init_get_color() -> Result<(), MachineError> {
     println!("memory {:?}", globals);
 
     {
-        let mut program = Program::new(buffer.as_slice(), globals.as_mut_slice())?;
+        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
 
         println!("stack is {:?}", stack);
 
@@ -71,5 +86,477 @@ fn test_init_get_color() -> Result<(), MachineError> {
 
     assert_eq!(stack.len(), 1); // 1 becouse we leave the led index on the stack in our test
     assert_eq!(stack[0], 31337);
+    Ok(())
+}
+
+#[test]
+fn op_push() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 42",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[42]);
+    Ok(())
+}
+
+#[test]
+fn op_pop() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "POP",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert!(stack.is_empty());
+    Ok(())
+}
+
+#[test]
+fn op_load() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 1 functions 1",
+        ".func main index 0",
+        "LOAD 0",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [99u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[99]);
+    Ok(())
+}
+
+#[test]
+fn op_store() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 1 functions 1",
+        ".func main index 0",
+        "PUSH 7",
+        "STORE 0",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(globals[0], 7);
+    assert!(stack.is_empty());
+    Ok(())
+}
+
+#[test]
+fn op_load_static() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".data consts",
+        "consts:",
+        ".word 123",
+        ".end",
+        ".func main index 0",
+        "LOAD_STATIC consts",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[123]);
+    Ok(())
+}
+
+#[test]
+fn op_jump() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "JUMP target",
+        "PUSH 1",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_branch_less_than() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "PUSH 2",
+        "BRLT target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_branch_less_than_eq() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 2",
+        "PUSH 2",
+        "BRLTE target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_branch_greater_than() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 3",
+        "PUSH 2",
+        "BRGT target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_branch_greater_than_eq() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 2",
+        "PUSH 2",
+        "BRGTE target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_branch_equal() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 5",
+        "PUSH 5",
+        "BREQ target",
+        "PUSH 9",
+        "RETURN",
+        "target:",
+        "PUSH 7",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_and() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "PUSH 2",
+        "AND",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[1]);
+    Ok(())
+}
+
+#[test]
+fn op_or() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0",
+        "PUSH 2",
+        "OR",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[1]);
+    Ok(())
+}
+
+#[test]
+fn op_xor() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0",
+        "PUSH 2",
+        "XOR",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[1]);
+    Ok(())
+}
+
+#[test]
+fn op_not() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0",
+        "NOT",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[1]);
+    Ok(())
+}
+
+#[test]
+fn op_bitwise_and() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0x0F0F",
+        "PUSH 0x00FF",
+        "BAND",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0x000F]);
+    Ok(())
+}
+
+#[test]
+fn op_bitwise_or() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0x0F0F",
+        "PUSH 0x00F0",
+        "BOR",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0x0FFF]);
+    Ok(())
+}
+
+#[test]
+fn op_bitwise_xor() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0x0F0F",
+        "PUSH 0x00FF",
+        "BXOR",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0x0FF0]);
+    Ok(())
+}
+
+#[test]
+fn op_bitwise_not() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 0x00FF",
+        "BNOT",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[0xFF00]);
+    Ok(())
+}
+
+#[test]
+fn op_multiply() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 6",
+        "PUSH 7",
+        "MUL",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[42]);
+    Ok(())
+}
+
+#[test]
+fn op_divide() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 84",
+        "PUSH 7",
+        "DIV",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[12]);
+    Ok(())
+}
+
+#[test]
+fn op_add() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 5",
+        "PUSH 7",
+        "ADD",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[12]);
+    Ok(())
+}
+
+#[test]
+fn op_subtract() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 10",
+        "PUSH 3",
+        "SUB",
+        "RETURN",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[7]);
+    Ok(())
+}
+
+#[test]
+fn op_return() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "RETURN",
+        "PUSH 2",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[1]);
     Ok(())
 }
