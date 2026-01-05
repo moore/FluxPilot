@@ -171,7 +171,7 @@ async fn main(spawner: Spawner) -> () {
     // BUG: we should check the values and log + restart
     // If we cant't start these the device will not work.
     let _ = spawner.spawn(usb_device_task(usb));
-    let _ = spawner.spawn(usb_rx_task(usb_receiver, usb_sender, shared));
+    let _ = spawner.spawn(io_task(usb_receiver, usb_sender, shared));
     led_task(
             &mut ws,
             data,
@@ -187,7 +187,7 @@ async fn usb_device_task(
 }
 
 #[embassy_executor::task]
-async fn usb_rx_task(
+async fn io_task(
     mut receiver: VendorReceiver<'static, Driver<'static, peripherals::USBD>>,
     mut sender: VendorSender<'static, Driver<'static, peripherals::USBD>>,
     shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
@@ -195,7 +195,7 @@ async fn usb_rx_task(
     loop {
         receiver.wait_connection().await;
         sender.wait_connection().await;
-        let _ = usb_receiver_loop(&mut receiver, &mut sender, shared).await;
+        let _ = io_loop(&mut receiver, &mut sender, shared).await;
     }
 }
 
@@ -276,7 +276,7 @@ impl From<EndpointError> for Disconnected {
     }
 }
 
-async fn usb_receiver_loop<'d, T: Instance + 'd>(
+async fn io_loop<'d, T: Instance + 'd>(
     receiver: &mut VendorReceiver<'d, Driver<'d, T>>,
     sender: &mut VendorSender<'d, Driver<'d, T>>,
     shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
@@ -308,7 +308,7 @@ async fn usb_receiver_loop<'d, T: Instance + 'd>(
                         frame.as_mut_slice(),
                         out_buf.as_mut_slice(),
                     );
-                    
+
                     match result {
                         Ok(wrote) => wrote,
                         Err(_) => {
