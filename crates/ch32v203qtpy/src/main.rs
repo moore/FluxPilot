@@ -28,7 +28,6 @@ use hal::spi::Spi;
 
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Timer, Instant, Duration};
 use embassy_usb::driver::EndpointError;
@@ -40,12 +39,17 @@ use ch32_hal::usbd::Instance;
 
 use {ch32_hal as hal, panic_halt as _};
 
-mod vendor_class;
-
-use crate::vendor_class::{VendorClass, VendorReceiver, VendorSender};
 use crate::ws2812::Ws2812;
 use smart_leds::{SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
+
+mod vendor_class;
+use crate::vendor_class::{VendorClass, VendorReceiver, VendorSender};
+
+//mod flash_storage;
+//use flash_storage::FlashStorage;
+
+
 
 use light_machine::{
     builder::{MachineBuilderError, Op, ProgramBuilder},
@@ -65,16 +69,8 @@ const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
 const INCOMING_MESSAGE_CAP: usize = 128;
 const OUTGOING_MESSAGE_CAP: usize = 128;
-const OUTGOING_QUEUE_DEPTH: usize = 1;
 const NUM_LEDS: usize = 25;
 const FRAME_TARGET: u64 = 16;
-
-static CHANNEL: StaticCell<Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>> = StaticCell::new();
-static OUTGOING_CHANNEL: StaticCell<Channel<
-    CriticalSectionRawMutex,
-    Vec<u8, OUTGOING_MESSAGE_CAP>,
-    OUTGOING_QUEUE_DEPTH,
->> = StaticCell::new();
 
 static PROGRAM_BUFFER: StaticCell<[u16; 100]> = StaticCell::new();
 static GLOBALS: StaticCell<[u16; 10]> = StaticCell::new();
@@ -155,12 +151,6 @@ async fn main(spawner: Spawner) -> () {
         pliot: Pliot::new(storage, globals.as_mut_slice()),
         stack: Vec::new(),
     }));
-    let channel = CHANNEL.init(Channel::new());
-    let sender = channel.sender();
-    let outgoing_channel = OUTGOING_CHANNEL.init(Channel::new());
-    let outgoing_sender = outgoing_channel.sender();
-    let outgoing_receiver = outgoing_channel.receiver();
-
     let (usb_sender, usb_receiver) = class.split();
 
     ////////////////////////////////////////////
@@ -181,9 +171,7 @@ async fn main(spawner: Spawner) -> () {
     // BUG: we should check the values and log + restart
     // If we cant't start these the device will not work.
     let _ = spawner.spawn(usb_device_task(usb));
-    let _ = spawner.spawn(usb_rx_task(usb_receiver, sender));
-    let _ = spawner.spawn(usb_tx_task(usb_sender, outgoing_receiver));
-    let _ = spawner.spawn(pliot_task(shared, channel, outgoing_sender));
+    let _ = spawner.spawn(usb_rx_task(usb_receiver, usb_sender, shared));
     led_task(
             &mut ws,
             data,
@@ -201,27 +189,13 @@ async fn usb_device_task(
 #[embassy_executor::task]
 async fn usb_rx_task(
     mut receiver: VendorReceiver<'static, Driver<'static, peripherals::USBD>>,
-    incoming: Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
+    mut sender: VendorSender<'static, Driver<'static, peripherals::USBD>>,
+    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
 ) {
     loop {
         receiver.wait_connection().await;
-        let _ = usb_receiver_loop(&mut receiver, &incoming).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn usb_tx_task(
-    mut sender: VendorSender<'static, Driver<'static, peripherals::USBD>>,
-    outgoing: Receiver<
-        'static,
-        CriticalSectionRawMutex,
-        Vec<u8, OUTGOING_MESSAGE_CAP>,
-        OUTGOING_QUEUE_DEPTH,
-    >,
-) {
-    loop {
         sender.wait_connection().await;
-        let _ = usb_sender_loop(&mut sender, &outgoing).await;
+        let _ = usb_receiver_loop(&mut receiver, &mut sender, shared).await;
     }
 }
 
@@ -260,42 +234,9 @@ async fn led_task(
     }
 }
 
-#[embassy_executor::task]
-async fn pliot_task(
-    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
-    channel: &'static Channel<CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
-    outgoing_sender: Sender<'static, CriticalSectionRawMutex, Vec<u8, OUTGOING_MESSAGE_CAP>, OUTGOING_QUEUE_DEPTH>,
-) {
-    loop {
-        let mut message = channel.receive().await;
-        let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
-        let wrote = {
-            let mut guard = shared.lock().await;
-            let PliotShared { pliot, stack } = &mut *guard;
-            match pliot.process_message(stack, message.as_mut_slice(), out_buf.as_mut_slice()) {
-                Ok(wrote) => wrote,
-                Err(_) => {
-                    // BUG: we should log error
-                    stack.clear();
-                    0
-                }
-            }
-        };
 
-        if wrote > 0 {
-            let mut response: Vec<u8, OUTGOING_MESSAGE_CAP> = Vec::new();
-            if let Some(bytes) = out_buf.get(..wrote) {
-                if response.extend_from_slice(bytes).is_ok() {
-                    let _ = outgoing_sender.try_send(response);
-                }
-            } else {
-                //BUG: this should be unreachable but we should log
-                // to catch bugs introduced in refactoring.
-            }
-        }
-    }
-}
-
+#[link_section = ".coldtext"]
+#[inline(never)]
 fn get_program(buffer: &mut [u16]) -> Result<usize, MachineBuilderError> {
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 2;
@@ -337,7 +278,8 @@ impl From<EndpointError> for Disconnected {
 
 async fn usb_receiver_loop<'d, T: Instance + 'd>(
     receiver: &mut VendorReceiver<'d, Driver<'d, T>>,
-    incoming: &Sender<'static, CriticalSectionRawMutex, Vec<u8, INCOMING_MESSAGE_CAP>, 1>,
+    sender: &mut VendorSender<'d, Driver<'d, T>>,
+    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
 ) -> Result<(), Disconnected> {
     let buf = USB_RECEIVE_BUF.init([0u8; 64]);
     let frame = RAW_MESSAGE_BUFF.init(Vec::new());
@@ -357,25 +299,36 @@ async fn usb_receiver_loop<'d, T: Instance + 'd>(
             }
 
             if byte == 0 {
-                let message = frame.clone();
+                let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
+                let wrote = {
+                    let mut guard = shared.lock().await;
+                    let PliotShared { pliot, stack } = &mut *guard;
+                    let result = pliot.process_message(
+                        stack,
+                        frame.as_mut_slice(),
+                        out_buf.as_mut_slice(),
+                    );
+                    
+                    match result {
+                        Ok(wrote) => wrote,
+                        Err(_) => {
+                            // BUG: we should log error
+                            stack.clear();
+                            0
+                        }
+                    }
+                };
                 frame.clear();
-                let _ = incoming.try_send(message);
+
+                if wrote > 0 {
+                    if let Some(bytes) = out_buf.get(..wrote) {
+                        sender.write_packet(bytes).await?;
+                    } else {
+                        //BUG: this should be unreachable but we should log
+                        // to catch bugs introduced in refactoring.
+                    }
+                }
             }
         }
-    }
-}
-
-async fn usb_sender_loop<'d, T: Instance + 'd>(
-    sender: &mut VendorSender<'d, Driver<'d, T>>,
-    outgoing: &Receiver<
-        'static,
-        CriticalSectionRawMutex,
-        Vec<u8, OUTGOING_MESSAGE_CAP>,
-        OUTGOING_QUEUE_DEPTH,
-    >,
-) -> Result<(), Disconnected> {
-    loop {
-        let message = outgoing.receive().await;
-        sender.write_packet(message.as_slice()).await?;
     }
 }

@@ -18,3 +18,5 @@
 - Implment LED configuration wizerd.
 - Implment i2c routing.
 - Implment Adfruit encoder board i2c parcer.
+- Implment custom ws2812 driver that dose not do so 
+  much copying and makes sure the data is sent out with DMA.
