@@ -234,8 +234,9 @@ const fn error_code(error_type: &ErrorType) -> u32 {
         ErrorType::UnexpectedMessageType(_) => 5,
         ErrorType::InvalidMessage => 6,
         ErrorType::ProgramTooLarge => 7,
-        ErrorType::InvalidProgram => 8,
-        ErrorType::UnknownProgram => 9,
+        ErrorType::UnalignedWrite => 8,
+        ErrorType::InvalidProgram => 9,
+        ErrorType::UnknownProgram => 10,
     }
 }
 
@@ -250,6 +251,7 @@ fn error_message(error_type: &ErrorType) -> String {
         }
         ErrorType::InvalidMessage => "invalid message (too large or corrupted)".to_string(),
         ErrorType::ProgramTooLarge => "program too large".to_string(),
+        ErrorType::UnalignedWrite => "unaligned flash write".to_string(),
         ErrorType::InvalidProgram => "invalid program".to_string(),
         ErrorType::UnknownProgram => "unknown program".to_string(),
     }

@@ -46,7 +46,7 @@ use ws2812_spi as ws2812;
 mod vendor_class;
 use crate::vendor_class::{VendorClass, VendorReceiver, VendorSender};
 
-//mod flash_storage;
+mod flash_storage;
 //use flash_storage::FlashStorage;
 
 

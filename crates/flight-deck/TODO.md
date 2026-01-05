@@ -15,6 +15,7 @@
 ## Later
 
 - Implment basic UI for custome program.
+- Add a watchdog reset in firmware to recover from hangs (flash ops timeout).
 - Implment LED configuration wizerd.
 - Implment i2c routing.
 - Implment Adfruit encoder board i2c parcer.

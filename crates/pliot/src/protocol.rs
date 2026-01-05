@@ -46,6 +46,7 @@ pub enum ErrorType {
     UnexpectedMessageType(MessageType),
     InvalidMessage,
     ProgramTooLarge,
+    UnalignedWrite,
     InvalidProgram,
     UnknownProgram,
 }
