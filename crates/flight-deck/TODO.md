@@ -21,3 +21,6 @@
 - Implment Adfruit encoder board i2c parcer.
 - Implment custom ws2812 driver that dose not do so 
   much copying and makes sure the data is sent out with DMA.
+- Investigate using the CH32V203 hardware CRC peripheral for flash header checks.
+- Add a note about .data LMA overflow: main FLASH stays 32K, consider a custom linker script to place .data load image in a `.colddata`/FLASH1 region (e.g. `AT>FLASH1`) to avoid overlapping `.coldtext`.
+- Cosider requiring an explisit command to format the flash instead of doing it if we get invlid headder.

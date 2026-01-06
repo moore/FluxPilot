@@ -34,6 +34,7 @@ use crate::protocol::{MessageType, RequestId};
 pub enum StorageError {
     ProgramTooLarge,
     UnalignedWrite,
+    InvalidHeader,
     UnknownProgram,
     InvalidProgram(MachineError),
     UnexpectedBlock,
@@ -181,6 +182,9 @@ impl<
                             },
                             StorageError::UnalignedWrite => {
                                 Self::write_error(Some(request_id), ErrorType::UnalignedWrite, out_buff)?;
+                            },
+                            StorageError::InvalidHeader => {
+                                Self::write_error(Some(request_id), ErrorType::InvalidHeader, out_buff)?;
                             },
                             StorageError::UnknownProgram => {
                                 Self::write_error(Some(request_id), ErrorType::UnknownProgram, out_buff)?;

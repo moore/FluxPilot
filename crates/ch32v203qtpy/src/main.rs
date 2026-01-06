@@ -46,16 +46,16 @@ use ws2812_spi as ws2812;
 mod vendor_class;
 use crate::vendor_class::{VendorClass, VendorReceiver, VendorSender};
 
+#[cfg(feature = "storage-flash")]
 mod flash_storage;
-//use flash_storage::FlashStorage;
 
-
-
-use light_machine::{
-    builder::{MachineBuilderError, Op, ProgramBuilder},
-    Word,
-};
-use pliot::{Pliot, meme_storage::MemStorage};
+use light_machine::builder::{MachineBuilderError, Op, ProgramBuilder};
+use light_machine::Word;
+use pliot::Pliot;
+#[cfg(feature = "storage-mem")]
+use pliot::meme_storage::MemStorage;
+#[cfg(feature = "storage-flash")]
+use crate::flash_storage::FlashStorage;
 
 use heapless::Vec;
 use static_cell::StaticCell;
@@ -72,9 +72,17 @@ const OUTGOING_MESSAGE_CAP: usize = 128;
 const NUM_LEDS: usize = 25;
 const FRAME_TARGET: u64 = 16;
 
+#[cfg(all(feature = "storage-mem", feature = "storage-flash"))]
+compile_error!("Enable only one of `storage-mem` or `storage-flash` features.");
+#[cfg(not(any(feature = "storage-mem", feature = "storage-flash")))]
+compile_error!("Enable exactly one of `storage-mem` or `storage-flash` features.");
+
 static PROGRAM_BUFFER: StaticCell<[u16; 100]> = StaticCell::new();
 static GLOBALS: StaticCell<[u16; 10]> = StaticCell::new();
+#[cfg(feature = "storage-mem")]
 static MEM_STORAGE: StaticCell<MemStorage<'static>> = StaticCell::new();
+#[cfg(feature = "storage-flash")]
+static FLASH_STORAGE: StaticCell<FlashStorage> = StaticCell::new();
 static USB_RECEIVE_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell::new();
 static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
@@ -83,9 +91,55 @@ static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
 static PLIOT_SHARED: StaticCell<Mutex<CriticalSectionRawMutex, PliotShared>> = StaticCell::new();
 
+#[cfg(feature = "storage-mem")]
+type StorageImpl = MemStorage<'static>;
+#[cfg(feature = "storage-flash")]
+type StorageImpl = FlashStorage;
+
 struct PliotShared {
-    pliot: Pliot<'static, 'static, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage<'static>>,
+    pliot: Pliot<'static, 'static, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, StorageImpl>,
     stack: Vec<Word, 100>,
+}
+
+static mut DEBUG_WS: *mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>> =
+    core::ptr::null_mut();
+static mut DEBUG_DATA: *mut [RGB8; NUM_LEDS] = core::ptr::null_mut();
+static mut DEBUG_STEP: usize = 0;
+
+pub(crate) fn debug_led_init(
+    ws: &mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>>,
+    data: &mut [RGB8; NUM_LEDS],
+) {
+    unsafe {
+        DEBUG_WS = ws;
+        DEBUG_DATA = data;
+        DEBUG_STEP = 0;
+        if let Some(buf) = DEBUG_DATA.as_mut() {
+            buf.fill(RGB8::default());
+        }
+    }
+}
+
+pub(crate) fn debug_led_clear() {
+    unsafe {
+        DEBUG_WS = core::ptr::null_mut();
+        DEBUG_DATA = core::ptr::null_mut();
+    }
+}
+
+pub(crate) fn debug_mark(color: RGB8) {
+    unsafe {
+        if DEBUG_WS.is_null() || DEBUG_DATA.is_null() {
+            return;
+        }
+        if DEBUG_STEP >= NUM_LEDS {
+            return;
+        }
+        let data = &mut *DEBUG_DATA;
+        data[DEBUG_STEP] = color;
+        let _ = (*DEBUG_WS).write(data.clone());
+        DEBUG_STEP += 1;
+    }
 }
 
 #[embassy_executor::main(entry = "qingke_rt::entry")]
@@ -94,6 +148,16 @@ async fn main(spawner: Spawner) -> () {
     hal::debug::SDIPrint::enable();
     let config = hal::Config{ rcc: hal::rcc::Config::SYSCLK_FREQ_144MHZ_HSI, ..Default::default() };
     let p = hal::init(config);
+
+    // SPI1 for WS2812 output.
+    let mosi = p.PA7;
+    let mut spi_config = hal::spi::Config::default();
+    spi_config.frequency = Hertz::mhz(3);
+    spi_config.mode = ws2812::MODE;
+    let spi = Spi::new_blocking_txonly_nosck(p.SPI1, mosi, spi_config);
+    let mut ws = Ws2812::new(spi);
+    let data = LED_BUFFER.init([RGB8::default(); NUM_LEDS]);
+    debug_led_init(&mut ws, data);
 
     let usb = p.USBD;
 
@@ -140,13 +204,66 @@ async fn main(spawner: Spawner) -> () {
     let usb = builder.build();
 
     /////////////////////////////////////////////////
-    let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
     let globals = GLOBALS.init([0u16; 10]);
-    if get_program(program_buffer).is_err() {
-        // BUG: we should log here.
-        return;
-    }
-    let storage = MEM_STORAGE.init(MemStorage::new(program_buffer.as_mut_slice()));
+    #[cfg(feature = "storage-mem")]
+    let storage = {
+        let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
+        if get_program(program_buffer).is_err() {
+            // BUG: we should log here.
+            return;
+        }
+        MEM_STORAGE.init(MemStorage::new(program_buffer.as_mut_slice()))
+    };
+    #[cfg(feature = "storage-flash")]
+    let storage = {
+        use pliot::StorageError;
+
+        let mut storage = match FlashStorage::open() {
+            Ok(storage) => storage,
+            Err(e) =>  match e {
+                StorageError::InvalidHeader => {
+                    if FlashStorage::probe_write_read().is_err() {
+                        // BUG: we should log here.
+                        return;
+                    }
+                    if FlashStorage::format().is_err() {
+                        // BUG: we should log here.
+                        return;
+                    }
+                    let Ok(storage) = FlashStorage::open() else  {
+                         // BUG: we should log here.
+                        return;
+                    };
+
+                    storage
+                }
+                _ => {
+                    // BUG: we should log here.
+                    return;
+                }
+            }
+        };
+        if storage.is_empty() {
+            let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
+            let program_len = match get_program(program_buffer) {
+                Ok(length) => length,
+                Err(_) => {
+                    // BUG: we should log here.
+                    return;
+                }
+            };
+            let Some(program) = program_buffer.get(..program_len) else {
+                // BUG: we should log here.
+                return;
+            };
+            if storage.write_program(program).is_err() {
+                // BUG: we should log here.
+                return;
+            }
+        }
+        FLASH_STORAGE.init(storage)
+    };
+
     let shared = PLIOT_SHARED.init(Mutex::new(PliotShared {
         pliot: Pliot::new(storage, globals.as_mut_slice()),
         stack: Vec::new(),
@@ -155,23 +272,12 @@ async fn main(spawner: Spawner) -> () {
 
     ////////////////////////////////////////////
 
-    // SPI1
-    let mosi = p.PA7;
-
-    let mut spi_config = hal::spi::Config::default();
-    spi_config.frequency = Hertz::mhz(3);
-    spi_config.mode = ws2812::MODE;
-
-    let spi = Spi::new_blocking_txonly_nosck(p.SPI1, mosi, spi_config);
-
-    let mut ws = Ws2812::new(spi);
-
-    let data = LED_BUFFER.init([RGB8::default(); NUM_LEDS]);
-
     // BUG: we should check the values and log + restart
     // If we cant't start these the device will not work.
     let _ = spawner.spawn(usb_device_task(usb));
     let _ = spawner.spawn(io_task(usb_receiver, usb_sender, shared));
+    // Boot step 2: USB tasks spawned.
+    debug_led_clear();
     led_task(
             &mut ws,
             data,

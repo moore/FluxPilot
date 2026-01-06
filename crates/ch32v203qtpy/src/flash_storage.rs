@@ -26,14 +26,23 @@
 //!
 //! References:
 //! - CH32FV2x_V3x Reference Manual, sections 32.2, 32.3, 32.4, 32.5.
-use core::ptr;
+use core::ptr::write_volatile;
+use core::sync::atomic::{fence, Ordering};
 
 use ch32_hal::pac;
 use light_machine::{Program, Word};
 use pliot::{ProgramNumber, Storage, StorageError};
 
+use crate::debug_mark;
+
+
 const PAGE_SIZE_BYTES: usize = 256;
 const WORD_SIZE_BYTES: usize = 2;
+// Header layout: magic, version, start offset (words), program length (words), header crc32.
+const HEADER_MAGIC: u32 = u32::from_le_bytes(*b"PLIO");
+const HEADER_VERSION: u32 = 1;
+const HEADER_SIZE_BYTES: usize = 20;
+const HEADER_WORDS: usize = HEADER_SIZE_BYTES / WORD_SIZE_BYTES;
 // TODO: Confirm these keys in the datasheet section for the FLASH interface.
 const FLASH_KEY1: u32 = 0x4567_0123;
 const FLASH_KEY2: u32 = 0xCDEF_89AB;
@@ -48,28 +57,119 @@ pub struct FlashStorage {
 }
 
 impl FlashStorage {
-    pub fn new() -> Self {
-        Self { program_words: 0 }
+    /// Open storage by reading and validating the on-flash header.
+    pub fn open() -> Result<Self, StorageError> {
+        let header = read_header()?;
+        let program_words =
+            usize::try_from(header.program_words).map_err(|_| StorageError::InvalidHeader)?;
+        Ok(Self { program_words })
     }
 
-    fn write_program(&mut self, program: &[Word]) -> Result<(), StorageError> {
+    pub fn is_empty(&self) -> bool {
+        self.program_words == 0
+    }
+
+    pub fn probe_write_read() -> Result<(), StorageError> {
+        const TEST_VALUE: Word = 0xA5A5;
+        let (storage_start, _) = storage_bounds();
+        let mut probe_result: Result<(), StorageError> = Ok(());
+        critical_section::with(|_| {
+            flash_unlock();
+            //flash_check_status();
+            probe_result = flash_erase_range(storage_start, PAGE_SIZE_BYTES);
+            //flash_check_status();
+            flash_lock();
+            //flash_check_status();
+        });
+        probe_result?;
+
+
+        let erased_value = unsafe { core::ptr::read_volatile(storage_start as *const Word) };
+        if erased_value == 0xFFFF {
+            debug_mark((0, 0, 32).into()); // Next LED (blue): probe erased ok.
+        } else {
+            debug_mark((64, 0, 0).into()); // Next LED (red): probe readback ok.
+            //return Err(StorageError::InvalidHeader);
+        }
+
+        let mut write_result: Result<(), StorageError> = Ok(());
+        critical_section::with(|_| {
+            flash_unlock();
+            //flash_check_status();
+            write_result = flash_program_word(storage_start, TEST_VALUE);
+            //flash_check_status();
+            flash_lock();
+            //flash_check_status();
+        });
+        debug_mark((32, 0, 32).into());
+        write_result?;
+        debug_mark((32, 0, 32).into());
+
+        let read_value = unsafe { core::ptr::read_volatile(storage_start as *const Word) };
+        if read_value == TEST_VALUE {
+            debug_mark((0, 32, 0).into()); // Next LED (green): probe readback ok.
+            Ok(())
+        } else if erased_value == read_value {
+            debug_mark((0, 0, 32).into()); // Next LED (blue): probe readback mismatch.
+            Err(StorageError::InvalidHeader)
+        } else {
+            debug_mark((32, 0, 0).into()); // Next LED (red): probe readback ok.
+            Err(StorageError::InvalidHeader)
+        }
+
+   }
+
+    /// Write an empty header so the flash is considered formatted.
+    pub fn format() -> Result<(), StorageError> {
+        let (storage_start, _) = storage_bounds();
+        let erase_len = align_up(HEADER_SIZE_BYTES, PAGE_SIZE_BYTES)?;
+        let mut format_result: Result<(), StorageError> = Ok(());
+        critical_section::with(|_| {
+            flash_unlock();
+            format_result = flash_erase_range(storage_start, erase_len)
+                .and_then(|_| {
+                    flash_program_header(storage_start, 0)
+                });
+            flash_lock();
+        });
+        format_result?;
+        if read_header().is_err() {
+            return Err(StorageError::InvalidHeader);
+        }
+        Ok(())
+    }
+
+    pub fn write_program(&mut self, program: &[Word]) -> Result<(), StorageError> {
         // Treat the input slice as the complete program image.
         let byte_len = program
             .len()
             .checked_mul(WORD_SIZE_BYTES)
             .ok_or(StorageError::ProgramTooLarge)?;
-        let (start, end) = storage_bounds();
-        let capacity = end.checked_sub(start).ok_or(StorageError::ProgramTooLarge)?;
+        let (storage_start, storage_end) = storage_bounds();
+        let program_start = storage_start
+            .checked_add(HEADER_SIZE_BYTES)
+            .ok_or(StorageError::ProgramTooLarge)?;
+        if program_start > storage_end {
+            return Err(StorageError::ProgramTooLarge);
+        }
+        let capacity = storage_end
+            .checked_sub(program_start)
+            .ok_or(StorageError::ProgramTooLarge)?;
         if byte_len > capacity {
             return Err(StorageError::ProgramTooLarge);
         }
 
+        let total_len = byte_len
+            .checked_add(HEADER_SIZE_BYTES)
+            .ok_or(StorageError::ProgramTooLarge)?;
+        let erase_len = align_up(total_len, PAGE_SIZE_BYTES)?;
+
         let mut program_result: Result<(), StorageError> = Ok(());
         critical_section::with(|_| {
             flash_unlock();
-            let erase_len = align_up(byte_len, PAGE_SIZE_BYTES);
-            program_result = flash_erase_range(start, erase_len)
-                .and_then(|_| flash_program_words(start, program));
+            program_result = flash_erase_range(storage_start, erase_len)
+                .and_then(|_| flash_program_words(program_start, program))
+                .and_then(|_| flash_program_header(storage_start, program.len()));
             flash_lock();
         });
         program_result?;
@@ -79,18 +179,17 @@ impl FlashStorage {
     }
 
     fn program_slice<'a>(&'a self) -> &'a [Word] {
-        let (start, end) = storage_bounds();
-        let max_len = end.saturating_sub(start) / WORD_SIZE_BYTES;
+        let Some((start, end)) = program_bounds() else {
+            return &[];
+        };
+        let max_len = end
+            .checked_sub(start)
+            .map(|len| len / WORD_SIZE_BYTES)
+            .unwrap_or(0);
         let len = self.program_words.min(max_len);
         // SAFETY: The storage region is linker-defined, word-aligned, and lives for the
         // program lifetime, so it's valid to create a static slice over it.
         unsafe { core::slice::from_raw_parts(start as *const Word, len) }
-    }
-}
-
-impl Default for FlashStorage {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -100,28 +199,42 @@ impl Storage for FlashStorage {
     /// `size` is in instruction count (words).
     fn get_program_loader(&mut self, size: u32) -> Result<Self::L, StorageError> {
         let size_words: usize = size.try_into().map_err(|_| StorageError::ProgramTooLarge)?;
-        let (start, end) = storage_bounds();
-        let capacity_words = end
-            .checked_sub(start)
+        let (storage_start, storage_end) = storage_bounds();
+        let program_start = storage_start
+            .checked_add(HEADER_SIZE_BYTES)
+            .ok_or(StorageError::ProgramTooLarge)?;
+        if program_start > storage_end {
+            return Err(StorageError::ProgramTooLarge);
+        }
+        let capacity_words = storage_end
+            .checked_sub(program_start)
             .ok_or(StorageError::ProgramTooLarge)?
-            / WORD_SIZE_BYTES;
+            .checked_div(WORD_SIZE_BYTES)
+            .ok_or(StorageError::ProgramTooLarge)?;
         if size_words > capacity_words {
             return Err(StorageError::ProgramTooLarge);
         }
 
         // Erase is done up front so add_block can stream writes without
         // worrying about page alignment.
+        let byte_len = size_words
+            .checked_mul(WORD_SIZE_BYTES)
+            .ok_or(StorageError::ProgramTooLarge)?;
+        let total_len = byte_len
+            .checked_add(HEADER_SIZE_BYTES)
+            .ok_or(StorageError::ProgramTooLarge)?;
+        let erase_len = align_up(total_len, PAGE_SIZE_BYTES)?;
+
         let mut erase_result: Result<(), StorageError> = Ok(());
         critical_section::with(|_| {
             flash_unlock();
-            let erase_len = align_up(size_words * WORD_SIZE_BYTES, PAGE_SIZE_BYTES);
-            erase_result = flash_erase_range(start, erase_len);
+            erase_result = flash_erase_range(storage_start, erase_len);
             flash_lock();
         });
         erase_result?;
 
-        self.program_words = size_words;
-        Ok(FlashProgramLoader::new(start, size_words))
+        self.program_words = 0;
+        Ok(FlashProgramLoader::new(program_start, size_words))
     }
 
     fn add_block(
@@ -134,7 +247,19 @@ impl Storage for FlashStorage {
     }
 
     fn finish_load(&mut self, loader: Self::L) -> Result<ProgramNumber, StorageError> {
-        loader.finish_load()
+        let (storage_start, _) = storage_bounds();
+        let program_words = loader.program_words;
+        loader.finish_load()?;
+        let mut header_result: Result<(), StorageError> = Ok(());
+        critical_section::with(|_| {
+            flash_unlock();
+            header_result = flash_program_header(storage_start, program_words);
+            flash_lock();
+        });
+        header_result?;
+
+        self.program_words = program_words;
+        Ok(ProgramNumber::new(0))
     }
 
     fn get_program<'a, 'b>(
@@ -189,9 +314,27 @@ impl FlashProgramLoader {
                 if program_result.is_err() {
                     break;
                 }
-                let addr = self.program_start + next_word * WORD_SIZE_BYTES;
+                let addr = match next_word.checked_mul(WORD_SIZE_BYTES) {
+                    Some(offset) => match self.program_start.checked_add(offset) {
+                        Some(addr) => addr,
+                        None => {
+                            program_result = Err(StorageError::ProgramTooLarge);
+                            break;
+                        }
+                    },
+                    None => {
+                        program_result = Err(StorageError::ProgramTooLarge);
+                        break;
+                    }
+                };
                 program_result = flash_program_word(addr, *word);
-                next_word += 1;
+                match next_word.checked_add(1) {
+                    Some(updated) => next_word = updated,
+                    None => {
+                        program_result = Err(StorageError::ProgramTooLarge);
+                        break;
+                    }
+                };
             }
             flash_lock();
         });
@@ -210,6 +353,13 @@ impl FlashProgramLoader {
     }
 }
 
+struct StorageHeader {
+    version: u32,
+    start_words: u32,
+    program_words: u32,
+    header_crc: u32,
+}
+
 fn storage_bounds() -> (usize, usize) {
     // SAFETY: These are linker-provided symbols, so taking their addresses is safe and does
     // not require alignment. Alignment only matters when we later cast to `*const Word`, and
@@ -219,24 +369,202 @@ fn storage_bounds() -> (usize, usize) {
     (start, end)
 }
 
-fn align_up(value: usize, align: usize) -> usize {
-    let mask = align - 1;
-    (value + mask) & !mask
+fn program_bounds() -> Option<(usize, usize)> {
+    let (start, end) = storage_bounds();
+    let program_start = start.checked_add(HEADER_SIZE_BYTES)?;
+    if program_start > end {
+        return None;
+    }
+    Some((program_start, end))
+}
+
+fn program_capacity_words() -> Option<usize> {
+    let (start, end) = program_bounds()?;
+    end.checked_sub(start)
+        .and_then(|len| len.checked_div(WORD_SIZE_BYTES))
+}
+
+fn read_header() -> Result<StorageHeader, StorageError> {
+    let (start, end) = storage_bounds();
+    if end
+        .checked_sub(start)
+        .ok_or(StorageError::InvalidHeader)?
+        < HEADER_SIZE_BYTES
+    {
+        return Err(StorageError::InvalidHeader);
+    }
+    // SAFETY: We only read from a linker-defined flash region as bytes.
+    let bytes = unsafe { core::slice::from_raw_parts(start as *const u8, HEADER_SIZE_BYTES) };
+    let magic = u32::from_le_bytes(
+        bytes
+            .get(0..4)
+            .ok_or(StorageError::InvalidHeader)?
+            .try_into()
+            .map_err(|_| StorageError::InvalidHeader)?,
+    );
+    if magic != HEADER_MAGIC {
+
+        return Err(StorageError::InvalidHeader);
+    }
+    let version = u32::from_le_bytes(
+        bytes
+            .get(4..8)
+            .ok_or(StorageError::InvalidHeader)?
+            .try_into()
+            .map_err(|_| StorageError::InvalidHeader)?,
+    );
+    let start_words = u32::from_le_bytes(
+        bytes
+            .get(8..12)
+            .ok_or(StorageError::InvalidHeader)?
+            .try_into()
+            .map_err(|_| StorageError::InvalidHeader)?,
+    );
+    let program_words = u32::from_le_bytes(
+        bytes
+            .get(12..16)
+            .ok_or(StorageError::InvalidHeader)?
+            .try_into()
+            .map_err(|_| StorageError::InvalidHeader)?,
+    );
+    let header_crc = u32::from_le_bytes(
+        bytes
+            .get(16..20)
+            .ok_or(StorageError::InvalidHeader)?
+            .try_into()
+            .map_err(|_| StorageError::InvalidHeader)?,
+    );
+    let computed_crc = crc32_bytes(bytes.get(0..16).ok_or(StorageError::InvalidHeader)?);
+    if computed_crc != header_crc {
+        return Err(StorageError::InvalidHeader);
+    }
+    if version != HEADER_VERSION {
+        return Err(StorageError::InvalidHeader);
+    }
+    if start_words != u32::try_from(HEADER_WORDS).map_err(|_| StorageError::InvalidHeader)? {
+        return Err(StorageError::InvalidHeader);
+    }
+    let capacity_words = program_capacity_words().ok_or(StorageError::InvalidHeader)?;
+    let program_words_usize =
+        usize::try_from(program_words).map_err(|_| StorageError::InvalidHeader)?;
+    if program_words_usize > capacity_words {
+        return Err(StorageError::InvalidHeader);
+    }
+    let program_start = start
+        .checked_add(HEADER_SIZE_BYTES)
+        .ok_or(StorageError::InvalidHeader)?;
+    let program_len = program_words_usize
+        .checked_mul(WORD_SIZE_BYTES)
+        .ok_or(StorageError::InvalidHeader)?;
+    let program_end = program_start
+        .checked_add(program_len)
+        .ok_or(StorageError::InvalidHeader)?;
+    if program_end > end {
+        return Err(StorageError::InvalidHeader);
+    }
+    Ok(StorageHeader {
+        version,
+        start_words,
+        program_words,
+        header_crc,
+    })
+}
+
+fn encode_header(
+    program_words: usize,
+) -> Result<[Word; HEADER_WORDS], StorageError> {
+    let program_words = u32::try_from(program_words).map_err(|_| StorageError::ProgramTooLarge)?;
+    let start_words = u32::try_from(HEADER_WORDS).map_err(|_| StorageError::ProgramTooLarge)?;
+    let mut bytes = [0u8; HEADER_SIZE_BYTES];
+    bytes
+        .get_mut(0..4)
+        .ok_or(StorageError::ProgramTooLarge)?
+        .copy_from_slice(&HEADER_MAGIC.to_le_bytes());
+    bytes
+        .get_mut(4..8)
+        .ok_or(StorageError::ProgramTooLarge)?
+        .copy_from_slice(&HEADER_VERSION.to_le_bytes());
+    bytes
+        .get_mut(8..12)
+        .ok_or(StorageError::ProgramTooLarge)?
+        .copy_from_slice(&start_words.to_le_bytes());
+    bytes
+        .get_mut(12..16)
+        .ok_or(StorageError::ProgramTooLarge)?
+        .copy_from_slice(&program_words.to_le_bytes());
+    let header_crc = crc32_bytes(bytes.get(0..16).ok_or(StorageError::ProgramTooLarge)?);
+    bytes
+        .get_mut(16..20)
+        .ok_or(StorageError::ProgramTooLarge)?
+        .copy_from_slice(&header_crc.to_le_bytes());
+    let mut words = [0u16; HEADER_WORDS];
+    for (idx, chunk) in bytes.chunks_exact(WORD_SIZE_BYTES).enumerate() {
+        let word_bytes = chunk.get(0..2).ok_or(StorageError::ProgramTooLarge)?;
+        let word = u16::from_le_bytes(
+            word_bytes
+                .try_into()
+                .map_err(|_| StorageError::ProgramTooLarge)?,
+        );
+        let slot = words
+            .get_mut(idx)
+            .ok_or(StorageError::ProgramTooLarge)?;
+        *slot = word;
+    }
+    Ok(words)
+}
+
+fn crc32_bytes(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            let mask = if (crc & 1) == 1 { u32::MAX } else { 0 };
+            crc = (crc >> 1) ^ (0xEDB8_8320u32 & mask);
+        }
+    }
+    !crc
+}
+
+fn align_up(value: usize, align: usize) -> Result<usize, StorageError> {
+    let mask = align
+        .checked_sub(1)
+        .ok_or(StorageError::ProgramTooLarge)?;
+    let value = value
+        .checked_add(mask)
+        .ok_or(StorageError::ProgramTooLarge)?;
+    Ok(value & !mask)
 }
 
 fn flash_unlock() {
     let flash = pac::FLASH;
+    let _clock_guard = FlashClockGuard::enter();
     // Enhanced read mode must be disabled before any erase/program sequence.
     flash_exit_enhanced_read();
-    if flash.ctlr().read().lock() {
-        flash.keyr().write(|w| w.set_keyr(FLASH_KEY1));
-        flash.keyr().write(|w| w.set_keyr(FLASH_KEY2));
+    // if flash.ctlr().read().lock() {
+    //     flash.keyr().write(|w| w.set_keyr(FLASH_KEY1));
+    //     flash.keyr().write(|w| w.set_keyr(FLASH_KEY2));
+    // }
+    if pac::FLASH.ctlr().read().lock() {
+        pac::FLASH.keyr().write(|w| w.set_keyr(0x4567_0123));
+        fence(Ordering::SeqCst);
+        pac::FLASH.keyr().write(|w| w.set_keyr(0xCDEF_89AB));
+        fence(Ordering::SeqCst);
+    }
+    if pac::FLASH.ctlr().read().flock() {
+        pac::FLASH.modekeyr().write(|w| w.set_modekeyr(0x4567_0123));
+        fence(Ordering::SeqCst);
+        pac::FLASH.modekeyr().write(|w| w.set_modekeyr(0xCDEF_89AB));
+        fence(Ordering::SeqCst);
     }
 }
 
 fn flash_lock() {
     let flash = pac::FLASH;
-    flash.ctlr().modify(|w| w.set_lock(true));
+    //flash.ctlr().modify(|w| w.set_lock(true));
+    pac::FLASH.ctlr().modify(|w| {
+        w.set_lock(true);
+        w.set_flock(true);
+    });
     // Re-enter enhanced read mode for normal execution.
     flash_enter_enhanced_read();
 }
@@ -244,6 +572,20 @@ fn flash_lock() {
 fn flash_wait_ready() {
     let flash = pac::FLASH;
     while flash.statr().read().bsy() || flash.statr().read().wr_bsy() {}
+}
+
+fn flash_wait_ready_write() -> Result<(), StorageError> {
+    let flash = pac::FLASH;
+    loop {
+        let status = flash.statr().read();
+        if !status.wr_bsy() {
+            if status.wrprterr() {
+                debug_mark((6, 0, 0).into()); // Next LED (red): write protection error.
+                return Err(StorageError::UnalignedWrite);
+            }
+            return Ok(());
+        }
+    }
 }
 
 fn flash_clear_status() {
@@ -255,16 +597,36 @@ fn flash_clear_status() {
     });
 }
 
+fn flash_check_status() -> Result<(), StorageError> {
+    return Ok(());
+    let flash = pac::FLASH;
+    let status = flash.statr().read();
+    if status.wrprterr() {
+        debug_mark((64, 0, 0).into()); // Next LED (red): write protection error.
+        return Err(StorageError::UnalignedWrite);
+    } else {
+        debug_mark((0, 64, 0).into()); // Next LED (green): operation complete.
+    }
+    if status.eop() {
+        debug_mark((0, 64, 0).into()); // Next LED (green): operation complete.
+    } else {
+        debug_mark((64, 0, 0).into()); // Next LED (red): write protection error.
+    }
+    Ok(())
+}
+
 fn flash_erase_page(page_addr: usize) {
     let flash = pac::FLASH;
     flash_wait_ready();
     flash_clear_status();
-    flash.ctlr().modify(|w| w.set_per(true));
+    flash.ctlr().modify(|w| w.set_page_er(true));
     flash.addr().write(|w| w.set_far(page_addr as u32));
+    fence(Ordering::SeqCst);
     flash.ctlr().modify(|w| w.set_strt(true));
     flash_wait_ready();
+    let _ = flash_check_status();
     flash_clear_status();
-    flash.ctlr().modify(|w| w.set_per(false));
+    flash.ctlr().modify(|w| w.set_page_er(false));
 }
 
 fn flash_erase_range(start: usize, len: usize) -> Result<(), StorageError> {
@@ -283,50 +645,81 @@ fn flash_erase_range(start: usize, len: usize) -> Result<(), StorageError> {
 }
 
 fn flash_program_word(addr: usize, value: Word) -> Result<(), StorageError> {
-    // Flash programming requires halfword alignment.
-    if addr % WORD_SIZE_BYTES != 0 {
-        return Err(StorageError::UnalignedWrite);
-    }
-    let (start, end) = storage_bounds();
-    // Reject writes outside the reserved flash storage window.
-    if addr < start || addr >= end {
-        return Err(StorageError::ProgramTooLarge);
-    }
-    let flash = pac::FLASH;
-    flash_wait_ready();
-    flash_clear_status();
-    flash.ctlr().modify(|w| w.set_pg(true));
-    // SAFETY: `addr` is validated to be aligned and within the flash storage region.
-    unsafe { ptr::write_volatile(addr as *mut Word, value) };
-    flash_wait_ready();
-    flash_clear_status();
-    flash.ctlr().modify(|w| w.set_pg(false));
-    Ok(())
+    flash_program_words(addr, &[value])
 }
 
 fn flash_program_words(start: usize, program: &[Word]) -> Result<(), StorageError> {
     let _clock_guard = FlashClockGuard::enter();
-    let mut addr = start;
-    for word in program {
-        flash_program_word(addr, *word)?;
+    if start % 4 != 0 {
+        return Err(StorageError::UnalignedWrite);
+    }
+    let (storage_start, storage_end) = storage_bounds();
+    let byte_len = program
+        .len()
+        .checked_mul(WORD_SIZE_BYTES)
+        .ok_or(StorageError::ProgramTooLarge)?;
+    let end = start
+        .checked_add(byte_len)
+        .ok_or(StorageError::ProgramTooLarge)?;
+    if start < storage_start || end > storage_end {
+        return Err(StorageError::ProgramTooLarge);
+    }
+    let mut addr = start as u32;
+    let flash = pac::FLASH;
+    flash_wait_ready();
+    flash_clear_status();
+    flash.ctlr().modify(|w| w.set_page_pg(true));
+    for chunk in program.chunks(2) {
+        let lo = *chunk.get(0).unwrap_or(&0xFFFF);
+        let hi = *chunk.get(1).unwrap_or(&0xFFFF);
+        let word = u32::from_le_bytes([lo as u8, (lo >> 8) as u8, hi as u8, (hi >> 8) as u8]);
+        // SAFETY: addr is aligned and inside the flash storage region.
+        unsafe { write_volatile(addr as *mut u32, word) };
+        fence(Ordering::SeqCst);
+        flash_wait_ready_write()?;
         addr = addr
-            .checked_add(WORD_SIZE_BYTES)
+            .checked_add(4)
             .ok_or(StorageError::ProgramTooLarge)?;
     }
+    flash.ctlr().modify(|w| w.set_pgstart(true));
+    flash_wait_ready();
+    flash_check_status()?;
+    flash_clear_status();
+    flash.ctlr().modify(|w| w.set_page_pg(false));
     Ok(())
 }
 
+fn flash_program_header(storage_start: usize, program_words: usize) -> Result<(), StorageError> {
+    let header_words = encode_header(program_words)?;
+    flash_program_words(storage_start, &header_words)
+}
+
 fn flash_enter_enhanced_read() {
+    let _clock_guard = FlashClockGuard::enter();
     let flash = pac::FLASH;
     flash.ctlr().modify(|w| w.set_enhancemode(true));
-    while !flash.statr().read().enhance_mod_sta() {}
+    for _ in 0..1_000_000 {
+        if flash.statr().read().enhance_mod_sta() {
+            return;
+        }
+    }
+    //debug_mark((0, 64, 64).into()); // Next LED (): enter enhanced read timed out.
 }
 
 fn flash_exit_enhanced_read() {
+    let _clock_guard = FlashClockGuard::enter();
     let flash = pac::FLASH;
+    if !flash.statr().read().enhance_mod_sta() {
+        return;
+    }
     flash.ctlr().modify(|w| w.set_enhancemode(false));
     flash.ctlr().modify(|w| w.set_rsenact(true));
-    while flash.statr().read().enhance_mod_sta() {}
+    for _ in 0..1_000_000 {
+        if !flash.statr().read().enhance_mod_sta() {
+            return;
+        }
+    }
+    debug_mark((255, 0, 255).into()); // Next LED (): enhanced read exit timed out.
 }
 
 struct FlashClockGuard {

@@ -54,8 +54,12 @@ impl<'d, D: Driver<'d>> VendorReceiver<'d, D> {
     pub async fn read_packet(&mut self, data: &mut [u8]) -> Result<usize, EndpointError> {
         let mut n = 0;
         loop {
-            let i = self.read_ep.read(&mut data[n..]).await?;
-            n += i;
+            // BUG: This whole function is kinda wack
+            let Some(buf) = data.get_mut(n..) else {
+                return Ok(n);
+            };
+            let i = self.read_ep.read(buf).await?;
+            n = n.saturating_add(i);
             if i < self.max_packet_size as usize {
                 return Ok(n);
             }
@@ -77,7 +81,7 @@ impl<'d, D: Driver<'d>> VendorSender<'d, D> {
         for chunk in data.chunks(self.max_packet_size as usize) {
             self.write_ep.write(chunk).await?;
         }
-        if data.len() % self.max_packet_size as usize == 0 {
+        if data.len().is_multiple_of(self.max_packet_size as usize) {
             self.write_ep.write(&[]).await?;
         }
         Ok(())

@@ -10,7 +10,7 @@ MEMORY
 SECTIONS
 {
     /* Reserve the tail of FLASH1 for flash-backed storage. */
-    __storage_size = 128K;
+    __storage_size = 8K;
     __storage_start = ORIGIN(FLASH1) + LENGTH(FLASH1) - __storage_size;
     __storage_end = ORIGIN(FLASH1) + LENGTH(FLASH1);
 
