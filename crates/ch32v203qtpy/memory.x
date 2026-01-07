@@ -1,4 +1,4 @@
-/* CH32V203G8 */
+/* CH32V203G6 */
 MEMORY
 {
 	FLASH : ORIGIN = 0x00000000, LENGTH = 32k
@@ -32,7 +32,7 @@ SECTIONS
     {
         . = __storage_start;
         . += __storage_size;
-    } >FLASH1
+    } >FLASH1 AT>FLASH1
 }
 
 REGION_ALIAS("REGION_TEXT", FLASH);

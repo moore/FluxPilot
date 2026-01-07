@@ -47,6 +47,7 @@ pub enum ErrorType {
     InvalidMessage,
     ProgramTooLarge,
     UnalignedWrite,
+    WriteFailed,
     InvalidHeader,
     InvalidProgram,
     UnknownProgram,

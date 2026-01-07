@@ -220,7 +220,7 @@ async fn main(spawner: Spawner) -> () {
 
         let mut storage = match FlashStorage::open() {
             Ok(storage) => storage,
-            Err(e) =>  match e {
+            Err(e) =>  match e {   
                 StorageError::InvalidHeader => {
                     if FlashStorage::probe_write_read().is_err() {
                         // BUG: we should log here.
