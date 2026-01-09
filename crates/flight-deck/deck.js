@@ -42,25 +42,42 @@ export async function initDeck() {
     globalThis[SEND_QUEUE_KEY] ??= new AsyncQueue();
     globalThis[DECK_KEY] ??= new FlightDeck();
     if (editorEl && !editorEl.value.trim()) {
-        editorEl.value = [
-            ".machine main globals 3 functions 2",
-            "",
-            ".func set_rgb index 0",
-            "    STORE 0",
-            "    STORE 1",
-            "    STORE 2",
-            "    EXIT",
-            ".end",
-            "",
-            ".func get_rgb index 1",
-            "    LOAD 0",
-            "    LOAD 1",
-            "    LOAD 2",
-            "    EXIT",
-            ".end",
-            "",
-            ".end",
-        ].join("\n");
+        editorEl.value = `
+.machine main globals 3 functions 2
+
+.func set_rgb index 0
+    STORE 0
+    STORE 1
+    STORE 2
+    EXIT
+.end
+
+.func get_rgb index 1
+    DUP
+    PUSH 120
+    MOD
+    SWAP
+    PUSH 120
+    DIV
+    PUSH 2
+    MOD
+    PUSH 0
+    BREQ even
+    PUSH 120
+    SWAP
+    SUB
+    even:
+    PUSH 4
+    DIV
+    LOAD 0
+    ADD
+    LOAD 1
+    LOAD 2
+    EXIT
+.end
+
+.end
+`;
     }
     return globalThis[DECK_KEY];
 }
