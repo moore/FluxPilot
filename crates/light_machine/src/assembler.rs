@@ -636,6 +636,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             "SSTORE" | "sstore" => Op::StackStore(operand.ok_or(AssemblerError::Kind(
                 AssemblerErrorKind::InvalidInstruction,
             ))?),
+            "DUP" | "dup" => Op::Dup,
+            "SWAP" | "swap" => Op::Swap,
             "LOAD_STATIC" | "load_static" => Op::LoadStatic,
             "JUMP" | "jump" => Op::Jump,
             "CALL" | "call" => Op::Call,

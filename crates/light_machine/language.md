@@ -77,6 +77,8 @@ Stack ops:
 
 - `PUSH <word>`         ; Push immediate word (2 words total)
 - `POP`                 ; Pop and discard
+- `DUP`                 ; Duplicate top of stack
+- `SWAP`                ; Swap top two values
 - `SLOAD <offset>`      ; Push stack[top - offset] (2 words total)
 - `SSTORE <offset>`     ; Store top at stack[top - offset] (2 words total)
 
@@ -115,6 +117,8 @@ Only these are executed today:
 
 - `PUSH <word>`: push immediate.
 - `POP`: pop top of stack, error if empty.
+- `DUP`: duplicate top of stack, error if empty.
+- `SWAP`: swap top two values, error if fewer than 2.
 - `LOAD <addr>`: read globals[addr], push; error if addr out of range.
 - `STORE <addr>`: pop and store to globals[addr], error if empty/out of range.
 - `SLOAD <offset>`: push stack[top - offset], error if out of range.
@@ -182,7 +186,7 @@ Whitespace and comments can appear between any tokens.
     data_word      = ".word" number | number ;
     operand        = number | ident ;
 
-    mnemonic       = "PUSH" | "POP" | "SLOAD" | "SSTORE" | "LOAD" | "STORE" | "LOAD_STATIC"
+    mnemonic       = "PUSH" | "POP" | "DUP" | "SWAP" | "SLOAD" | "SSTORE" | "LOAD" | "STORE" | "LOAD_STATIC"
                    | "JUMP" | "CALL" | "BRLT" | "BRLTE" | "BRGT" | "BRGTE" | "BREQ"
                    | "EXIT"
                    | "AND" | "OR" | "XOR" | "NOT"

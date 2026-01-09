@@ -98,6 +98,8 @@ pub enum Ops {
     Call,
     StackLoad,
     StackStore,
+    Dup,
+    Swap,
 }
 
 impl From<Ops> for Word {
@@ -508,6 +510,15 @@ impl<'a, 'b> Program<'a, 'b> {
                         .ok_or(MachineError::StackUnderFlow)?;
                     *slot = value;
                     let _ = pop(stack)?;
+                }
+                Ops::Dup => {
+                    let value = *stack.last().ok_or(MachineError::StackUnderFlow)?;
+                    push(stack, value)?;
+                }
+                Ops::Swap => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    push(stack, rhs)?;
+                    push(stack, lhs)?;
                 }
                 Ops::Exit => break,
                 Ops::Call => {

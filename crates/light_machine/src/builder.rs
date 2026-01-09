@@ -310,6 +310,8 @@ pub enum Op {
     Call,
     StackLoad(Word),
     StackStore(Word),
+    Dup,
+    Swap,
     BranchLessThan,
     BranchLessThanEq,
     BranchGreaterThan,
@@ -399,6 +401,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             Op::StackStore(offset) => {
                 self.machine.add_word(Ops::StackStore.into())?;
                 self.machine.add_word(offset)?;
+            }
+            Op::Dup => {
+                self.machine.add_word(Ops::Dup.into())?;
+            }
+            Op::Swap => {
+                self.machine.add_word(Ops::Swap.into())?;
             }
             Op::BranchLessThan => {
                 self.machine.add_word(Ops::BranchLessThan.into())?;

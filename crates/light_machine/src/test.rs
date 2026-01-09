@@ -196,6 +196,43 @@ fn op_pop() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_dup() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 5",
+        "DUP",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[5, 5]);
+    Ok(())
+}
+
+#[test]
+fn op_swap() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "PUSH 2",
+        "SWAP",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[2, 1]);
+    Ok(())
+}
+
+#[test]
 fn op_sload() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
