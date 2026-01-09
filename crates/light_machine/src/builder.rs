@@ -325,6 +325,7 @@ pub enum Op {
     BitwiseNot,
     Multiply,
     Devide,
+    Mod,
     Add,
     Subtract,
     Exit,
@@ -443,6 +444,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             }
             Op::Devide => {
                 self.machine.add_word(Ops::Divide.into())?;
+            }
+            Op::Mod => {
+                self.machine.add_word(Ops::Mod.into())?;
             }
             Op::Add => {
                 self.machine.add_word(Ops::Add.into())?;

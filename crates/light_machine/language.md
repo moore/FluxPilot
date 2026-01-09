@@ -107,7 +107,7 @@ Logic ops (reserved):
 
 Arithmetic ops (reserved):
 
-- `ADD` `SUB` `MUL` `DIV`      ; Arithmetic on top-of-stack values
+- `ADD` `SUB` `MUL` `DIV` `MOD` ; Arithmetic on top-of-stack values
 
 ## Semantics (current runtime)
 
@@ -123,6 +123,7 @@ Only these are executed today:
 - `JUMP`: pop addr and jump.
 - `CALL`: pop function index, call function, resume after.
 - `BRLT`/`BRLTE`/`BRGT`/`BRGTE`/`BREQ`: pop addr and compare.
+- `ADD`/`SUB`/`MUL`/`DIV`/`MOD`: pop two values, push arithmetic result.
 - `EXIT`: return from function.
 
 Reserved instructions assemble but are not executed yet. Programs using them
@@ -186,7 +187,7 @@ Whitespace and comments can appear between any tokens.
                    | "EXIT"
                    | "AND" | "OR" | "XOR" | "NOT"
                    | "BAND" | "BOR" | "BXOR" | "BNOT"
-                   | "ADD" | "SUB" | "MUL" | "DIV" ;
+                   | "ADD" | "SUB" | "MUL" | "DIV" | "MOD" ;
 
     number         = dec_number | hex_number ;
     dec_number     = digit { digit } ;

@@ -77,17 +77,88 @@ fn test_init_get_color() -> Result<(), MachineError> {
         println!("stack is {:?}", stack);
 
         let (r, g, b) = program
-            .get_led_color(0, 31337, &mut stack)
+            .get_led_color(0, 31337, 17, &mut stack)
             .expect("Could not get led color");
 
         println!("stack is {:?}", stack);
         assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
     }
 
-    assert_eq!(stack.len(), 1); // 1 becouse we leave the led index on the stack in our test
-    assert_eq!(stack[0], 31337);
+    assert_eq!(stack.len(), 2); // 1 becouse we leave the led index on the stack in our test
+    assert_eq!((stack[0], stack[1]), (31337, 17));
     Ok(())
 }
+
+
+#[test]
+fn test_init_get_color2() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 3 functions 2",
+        ".func set_rgb index 0",
+        "STORE 0",
+        "STORE 1",
+        "STORE 2",
+        "EXIT",
+        ".end",
+        ".func get_rgb index 1",
+        "LOAD 0",
+        "ADD",
+        "PUSH 255",
+        "MOD",
+        "LOAD 1",
+        "LOAD 2",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+
+    println!("program {:?}", program);
+
+    let mut globals = [0u16; 10];
+    let (red, green, blue) = (17, 23, 31);
+    let mut stack: Vec<Word, 100> = Vec::new();
+
+    {
+        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
+
+        stack.push(red).unwrap();
+        stack.push(green).unwrap();
+        stack.push(blue).unwrap();
+        program.init_machine(0, &mut stack)?;
+    }
+    assert_eq!(stack.len(), 0);
+
+    println!("memory {:?}", globals);
+
+    {
+        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
+
+        println!("stack is {:?}", stack);
+
+        let (r, g, b) = program
+            .get_led_color(0, 31337, 1, &mut stack)
+            .expect("Could not get led color");
+
+        println!("stack is {:?}", stack);
+        assert_eq!((r as u16, g as u16, b as u16), (red, green, blue + 1));
+
+        assert_eq!(stack.len(), 1); // 1 becouse we leave the led index on the stack in our test
+        assert_eq!((stack[0]), (31337));    
+        stack.clear();
+
+        let (r, g, b) = program
+            .get_led_color(0, 31337, 30, &mut stack)
+            .expect("Could not get led color");
+
+        println!("stack is {:?}", stack);
+        assert_eq!((r as u16, g as u16, b as u16), (red, green, blue + 30));
+    }
+
+    assert_eq!(stack.len(), 1); // 1 becouse we leave the led index on the stack in our test
+    assert_eq!((stack[0]), (31337));
+    Ok(())
+}
+
 
 #[test]
 fn op_push() -> Result<(), MachineError> {
@@ -731,6 +802,25 @@ fn op_divide() -> Result<(), MachineError> {
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[12]);
+    Ok(())
+}
+
+#[test]
+fn op_mod() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        "PUSH 29",
+        "PUSH 5",
+        "MOD",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[4]);
     Ok(())
 }
 

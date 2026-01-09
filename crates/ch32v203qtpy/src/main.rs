@@ -310,18 +310,15 @@ async fn led_task(
     data: &mut [RGB8; NUM_LEDS],
     shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
 ) {
+    let mut tick = 0u16;
     loop {
-        // If I could track times I could make my anamations
-        // have really tight timeing when there is no message
-        // to process but this makes the program a little too
-        // large. If I can find some spae else where lets try
-        // this agin.
+        
         let start_time = Instant::now();
         {
             let mut guard = shared.lock().await;
             let PliotShared { pliot, stack } = &mut *guard;
             for (i, led) in data.iter_mut().enumerate() {
-                if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, stack) {
+                if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, tick, stack) {
                     *led = (red, green, blue).into();
                     stack.clear();
                 }
@@ -337,6 +334,7 @@ async fn led_task(
         };
 
         Timer::after(wait_duration).await;
+        tick = tick.wrapping_add(1);
     }
 }
 

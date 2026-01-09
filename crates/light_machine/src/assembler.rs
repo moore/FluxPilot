@@ -657,6 +657,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             "SUB" | "sub" => Op::Subtract,
             "MUL" | "mul" => Op::Multiply,
             "DIV" | "div" => Op::Devide,
+            "MOD" | "mod" => Op::Mod,
             _ => return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction)),
         };
 

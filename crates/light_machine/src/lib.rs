@@ -87,6 +87,7 @@ pub enum Ops {
     BitwiseNot,
     Multiply,
     Divide,
+    Mod,
     Add,
     Subtract,
     Load,
@@ -273,9 +274,12 @@ impl<'a, 'b> Program<'a, 'b> {
         &mut self,
         machine_number: Word,
         index: u16,
+        tick: u16,
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(u8, u8, u8), MachineError> {
         stack.push(index).map_err(|_| MachineError::StackOverflow)?;
+        stack.push(tick).map_err(|_| MachineError::StackOverflow)?;
+
 
         let entry_point = self.get_function_entry(machine_number, GET_COLOR_OFFSET)?;
 
@@ -417,6 +421,13 @@ impl<'a, 'b> Program<'a, 'b> {
                     let (lhs, rhs) = pop2(stack)?;
                     let result = lhs
                         .checked_div(rhs)
+                        .ok_or(MachineError::InvalidOp(word))?;
+                    push(stack, result)?;
+                }
+                Ops::Mod => {
+                    let (lhs, rhs) = pop2(stack)?;
+                    let result = lhs
+                        .checked_rem(rhs)
                         .ok_or(MachineError::InvalidOp(word))?;
                     push(stack, result)?;
                 }

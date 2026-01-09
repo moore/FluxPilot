@@ -279,11 +279,12 @@ impl<
         &mut self,
         machine_number: Word,
         index: u16,
+        tick: u16,
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(u8, u8, u8), PliotError> {
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
-        let result = program.get_led_color(machine_number, index, stack)?;
+        let result = program.get_led_color(machine_number, index, tick, stack)?;
         Ok(result)
     }
 
