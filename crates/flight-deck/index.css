@@ -1,17 +1,17 @@
 :root {
-  --bg-0: #f7f5fb;
-  --bg-1: #f1f6fb;
-  --bg-2: #eef9f5;
-  --ink-0: #2a2f3a;
-  --ink-1: #4f5d6b;
-  --ink-2: #7b8a99;
-  --accent-0: #f6b7d2;
-  --accent-1: #9bd5ff;
-  --accent-2: #a6e6c2;
-  --card: rgba(220, 212, 238, 0.85);
-  --card-strong: rgba(192, 220, 245, 0.85);
-  --stroke: rgba(115, 135, 160, 0.35);
-  --shadow: 0 20px 50px rgba(120, 140, 170, 0.25);
+  --bg-0: #f8a0b6;
+  --bg-1: #f5b1c6;
+  --bg-2: #f7c2d6;
+  --ink-0: #3b1f4c;
+  --ink-1: #6a3a74;
+  --ink-2: #8f6a98;
+  --accent-0: #c5a1ef;
+  --accent-1: #79d7d6;
+  --accent-2: #b7f2de;
+  --card: rgba(244, 206, 230, 0.88);
+  --card-strong: rgba(236, 198, 232, 0.92);
+  --stroke: rgba(124, 86, 150, 0.4);
+  --shadow: 0 24px 52px rgba(136, 82, 122, 0.25);
   --radius-lg: 24px;
   --radius-md: 16px;
   --radius-sm: 10px;
@@ -35,11 +35,7 @@ body {
 body {
   font-family: var(--font-body);
   color: var(--ink-0);
-  background: radial-gradient(circle at 12% 8%, rgba(155, 213, 255, 0.48) 0%, transparent 52%),
-    radial-gradient(circle at 85% 10%, rgba(246, 183, 210, 0.45) 0%, transparent 50%),
-    radial-gradient(circle at 30% 45%, rgba(166, 230, 194, 0.3) 0%, transparent 60%),
-    linear-gradient(140deg, var(--bg-0), var(--bg-1), var(--bg-2));
-  background-attachment: fixed;
+  background: #ffffff;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -51,7 +47,8 @@ body {
   display: grid;
   grid-template-rows: auto auto auto;
   gap: var(--gap-lg);
-  background: rgba(210, 202, 236, 0.82);
+  background: radial-gradient(circle at 18% 10%, rgba(255, 232, 246, 0.9) 0%, transparent 55%),
+    linear-gradient(160deg, rgba(244, 206, 230, 0.92), rgba(226, 192, 236, 0.9));
   border: 1px solid var(--stroke);
   border-radius: var(--radius-lg);
   padding: 28px;
@@ -73,13 +70,13 @@ body {
 }
 
 .shell::before {
-  background: rgba(155, 213, 255, 0.35);
+  background: rgba(121, 215, 214, 0.35);
   top: -160px;
   right: -120px;
 }
 
 .shell::after {
-  background: rgba(166, 230, 194, 0.28);
+  background: rgba(197, 161, 239, 0.32);
   bottom: -180px;
   left: -120px;
 }
@@ -141,8 +138,8 @@ header {
 }
 
 .button {
-  border: 2px solid rgba(120, 140, 166, 0.55);
-  background: rgba(214, 226, 246, 0.8);
+  border: 2px solid rgba(122, 86, 152, 0.55);
+  background: rgba(233, 197, 226, 0.85);
   color: var(--ink-0);
   padding: 10px 16px;
   border-radius: var(--radius-sm);
@@ -162,20 +159,20 @@ header {
 }
 
 .button.primary {
-  background: rgba(206, 160, 198, 0.9);
-  color: #3b2a36;
+  background: rgba(199, 164, 234, 0.92);
+  color: #3a1d4b;
   border: none;
-  box-shadow: 0 12px 20px rgba(150, 130, 176, 0.32);
+  box-shadow: 0 12px 20px rgba(139, 95, 163, 0.32);
 }
 
 .button:hover {
   transform: translateY(-2px);
-  background: rgba(195, 214, 238, 0.92);
-  border-color: rgba(108, 125, 152, 0.7);
+  background: rgba(240, 210, 232, 0.92);
+  border-color: rgba(110, 74, 143, 0.7);
 }
 
 .button.primary:hover {
-  background: rgba(216, 170, 208, 0.95);
+  background: rgba(209, 178, 240, 0.95);
 }
 
 main {
@@ -197,7 +194,8 @@ main {
 }
 
 .tracks-panel {
-  background: linear-gradient(160deg, rgba(158, 182, 224, 0.92), rgba(214, 232, 248, 0.92));
+  background: linear-gradient(160deg, rgba(160, 196, 222, 0.92), rgba(190, 222, 240, 0.92)),
+    repeating-linear-gradient(135deg, rgba(214, 235, 246, 0.24) 0px, rgba(214, 235, 246, 0.24) 12px, rgba(168, 198, 224, 0.18) 12px, rgba(168, 198, 224, 0.18) 24px);
 }
 
 .panel-header {
@@ -233,8 +231,9 @@ main {
   margin-top: var(--gap-sm);
   padding: 16px;
   border-radius: var(--radius-sm);
-  border: 2px solid rgba(120, 140, 166, 0.4);
-  background: linear-gradient(160deg, rgba(190, 222, 206, 0.9), rgba(222, 244, 232, 0.9));
+  border: 2px solid rgba(108, 140, 128, 0.45);
+  background: linear-gradient(160deg, rgba(178, 228, 206, 0.92), rgba(212, 244, 230, 0.92)),
+    repeating-linear-gradient(135deg, rgba(226, 248, 234, 0.24) 0px, rgba(226, 248, 234, 0.24) 12px, rgba(172, 214, 198, 0.18) 12px, rgba(172, 214, 198, 0.18) 24px);
   display: grid;
   gap: 14px;
 }
@@ -266,18 +265,18 @@ main {
 }
 
 #red {
-  background: rgba(236, 130, 158, 0.85);
-  color: #3d1822;
+  background: rgba(240, 150, 178, 0.9);
+  color: #4a1c2a;
 }
 
 #green {
-  background: rgba(136, 212, 176, 0.85);
-  color: #15322a;
+  background: rgba(174, 236, 206, 0.9);
+  color: #1c3a30;
 }
 
 #blue {
-  background: rgba(120, 176, 232, 0.85);
-  color: #14243d;
+  background: rgba(144, 206, 242, 0.9);
+  color: #1b2a46;
 }
 
 .slider-wrap {
@@ -372,9 +371,10 @@ fd-track {
   align-items: center;
   padding: 14px;
   border-radius: var(--radius-sm);
-  background: rgba(220, 190, 228, 0.7);
-  border: 2px solid rgba(120, 140, 166, 0.45);
-  box-shadow: 0 12px 22px rgba(167, 170, 214, 0.22);
+  background: linear-gradient(160deg, rgba(222, 190, 232, 0.84), rgba(238, 210, 242, 0.84)),
+    repeating-linear-gradient(135deg, rgba(242, 220, 248, 0.24) 0px, rgba(242, 220, 248, 0.24) 10px, rgba(210, 182, 226, 0.18) 10px, rgba(210, 182, 226, 0.18) 20px);
+  border: 2px solid rgba(118, 86, 148, 0.45);
+  box-shadow: 0 12px 22px rgba(142, 102, 176, 0.22);
   min-height: 86px;
 }
 
@@ -414,9 +414,9 @@ fd-track {
 }
 
 .track-delete {
-  border: 2px solid rgba(123, 105, 146, 0.55);
-  background: rgba(214, 197, 238, 0.8);
-  color: #3a2145;
+  border: 2px solid rgba(122, 84, 158, 0.55);
+  background: rgba(232, 202, 240, 0.88);
+  color: #3a1e4b;
   padding: 6px 12px;
   border-radius: 999px;
   font-family: var(--font-display);
@@ -429,7 +429,7 @@ fd-track {
 
 .track-delete:hover {
   transform: translateY(-1px);
-  border-color: rgba(103, 86, 128, 0.7);
+  border-color: rgba(100, 64, 132, 0.7);
 }
 
 .track-list.drag-over {
@@ -440,14 +440,15 @@ fd-track {
 .chip {
   padding: 6px 10px;
   border-radius: 999px;
-  border: 2px solid rgba(128, 150, 176, 0.4);
+  border: 2px solid rgba(126, 96, 158, 0.42);
   font-size: 12px;
   color: var(--ink-0);
-  background: rgba(198, 224, 210, 0.88);
+  background: rgba(214, 238, 228, 0.9);
 }
 
 .panel.secondary {
-  background: rgba(202, 190, 236, 0.86);
+  background: linear-gradient(160deg, rgba(212, 184, 232, 0.9), rgba(228, 204, 240, 0.9)),
+    repeating-linear-gradient(135deg, rgba(240, 220, 248, 0.22) 0px, rgba(240, 220, 248, 0.22) 12px, rgba(202, 174, 222, 0.16) 12px, rgba(202, 174, 222, 0.16) 24px);
 }
 
 .machine-rack {
@@ -464,7 +465,7 @@ fd-track {
 .rack-scrim {
   position: absolute;
   inset: 0;
-  background: rgba(140, 132, 170, 0.35);
+  background: rgba(174, 116, 164, 0.32);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.35s ease;
@@ -488,8 +489,9 @@ fd-track {
   gap: 10px;
   padding: 14px;
   border-radius: var(--radius-sm);
-  border: 2px solid rgba(120, 140, 166, 0.4);
-  background: rgba(206, 198, 236, 0.82);
+  border: 2px solid rgba(124, 94, 156, 0.45);
+  background: linear-gradient(160deg, rgba(218, 192, 238, 0.88), rgba(234, 212, 244, 0.88)),
+    repeating-linear-gradient(135deg, rgba(242, 226, 250, 0.22) 0px, rgba(242, 226, 250, 0.22) 12px, rgba(204, 178, 224, 0.16) 12px, rgba(204, 178, 224, 0.16) 24px);
 }
 
 .assembler-header {
@@ -514,23 +516,24 @@ fd-track {
   resize: vertical;
   padding: 12px;
   border-radius: var(--radius-sm);
-  border: 2px solid rgba(120, 140, 166, 0.35);
-  background: rgba(214, 206, 240, 0.8);
+  border: 2px solid rgba(126, 94, 160, 0.35);
+  background: rgba(234, 206, 244, 0.86);
   color: var(--ink-0);
   font-family: "Courier New", monospace;
   font-size: 13px;
 }
 
 .machine-card:first-of-type {
-  border-color: rgba(136, 120, 170, 0.55);
-  box-shadow: 0 12px 22px rgba(165, 150, 204, 0.25);
+  border-color: rgba(152, 112, 192, 0.55);
+  box-shadow: 0 12px 22px rgba(162, 114, 200, 0.25);
 }
 
 .machine-card {
   padding: 16px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--stroke);
-  background: rgba(198, 208, 236, 0.78);
+  border: 1px solid rgba(126, 90, 158, 0.42);
+  background: linear-gradient(160deg, rgba(216, 190, 232, 0.86), rgba(232, 208, 240, 0.86)),
+    repeating-linear-gradient(135deg, rgba(240, 220, 248, 0.22) 0px, rgba(240, 220, 248, 0.22) 12px, rgba(202, 174, 222, 0.16) 12px, rgba(202, 174, 222, 0.16) 24px);
   display: grid;
   gap: 10px;
 }
@@ -546,9 +549,9 @@ fd-track {
 
 .machine-add {
   align-self: flex-start;
-  border: 2px solid rgba(119, 138, 166, 0.6);
-  background: rgba(205, 220, 244, 0.85);
-  color: #2c3442;
+  border: 2px solid rgba(122, 90, 158, 0.6);
+  background: rgba(228, 200, 240, 0.9);
+  color: #3a2250;
   padding: 6px 12px;
   border-radius: 999px;
   font-family: var(--font-display);
@@ -561,7 +564,7 @@ fd-track {
 
 .machine-add:hover {
   transform: translateY(-1px);
-  border-color: rgba(92, 111, 138, 0.75);
+  border-color: rgba(98, 66, 132, 0.75);
 }
 
 .machine-card h3 {
