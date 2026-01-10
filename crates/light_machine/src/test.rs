@@ -239,7 +239,7 @@ fn op_sload() -> Result<(), MachineError> {
         ".func main index 0",
         "PUSH 10",
         "PUSH 20",
-        "SLOAD 1",
+        "SLOAD 0",
         "EXIT",
         ".end",
         ".end",
@@ -259,7 +259,7 @@ fn op_sstore() -> Result<(), MachineError> {
         "PUSH 1",
         "PUSH 2",
         "PUSH 3",
-        "SSTORE 2",
+        "SSTORE 0",
         "EXIT",
         ".end",
         ".end",
@@ -918,14 +918,15 @@ fn op_exit() -> Result<(), MachineError> {
 }
 
 #[test]
-fn multi_function_calls() -> Result<(), MachineError> {
+fn op_return() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 2",
         ".func helper index 1",
-        "PUSH 77",
-        "EXIT",
+        "PUSH 99",
+        "RET",
         ".end",
         ".func main index 0",
+        "PUSH 0",
         "CALL helper",
         "EXIT",
         ".end",
@@ -934,19 +935,7 @@ fn multi_function_calls() -> Result<(), MachineError> {
 
     let mut globals = [0u16; 1];
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
-
-    {
-        let mut program = Program::new(program.as_slice(), &mut globals)?;
-        program.call(0, 0, &mut stack)?;
-    }
-    assert_eq!(stack.as_slice(), &[77]);
-
-    stack.clear();
-
-    {
-        let mut program = Program::new(program.as_slice(), &mut globals)?;
-        program.call(0, 1, &mut stack)?;
-    }
-    assert_eq!(stack.as_slice(), &[77]);
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[99]);
     Ok(())
 }

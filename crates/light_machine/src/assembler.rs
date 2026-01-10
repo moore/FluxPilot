@@ -638,6 +638,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ))?),
             "DUP" | "dup" => Op::Dup,
             "SWAP" | "swap" => Op::Swap,
+            "RET" | "ret" => Op::Return,
             "LOAD_STATIC" | "load_static" => Op::LoadStatic,
             "JUMP" | "jump" => Op::Jump,
             "CALL" | "call" => Op::Call,

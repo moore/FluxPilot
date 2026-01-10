@@ -100,6 +100,7 @@ pub enum Ops {
     StackStore,
     Dup,
     Swap,
+    Return,
 }
 
 impl From<Ops> for Word {
@@ -213,6 +214,7 @@ impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> Default
 pub struct Program<'a, 'b> {
     static_data: &'a [Word],
     globals: &'b mut [Word],
+    frame_pointer: Word,
 }
 
 impl<'a, 'b> Program<'a, 'b> {
@@ -228,8 +230,10 @@ impl<'a, 'b> Program<'a, 'b> {
         Ok(Self {
             static_data,
             globals,
+            frame_pointer: 0,
         })
     }
+
 
     pub fn machine_count(&self) -> Result<Word, MachineError> {
         let Some(count) = self.static_data.get(MACHINE_COUNT_OFFSET) else {
@@ -313,6 +317,7 @@ impl<'a, 'b> Program<'a, 'b> {
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let entry_point = self.get_function_entry(machine_number, function_number)?;
+
         self.run(machine_number, entry_point, stack)?;
         Ok(())
     }
@@ -485,28 +490,26 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::StackLoad => {
                     pc = next_pc(pc)?;
-                    let offset = read_static(pc, self.static_data)? as usize;
-                    let index = stack
-                        .len()
-                        .checked_sub(1)
-                        .and_then(|top| top.checked_sub(offset))
+                    let offset = read_static(pc, self.static_data)?;
+                    let index = self
+                        .frame_pointer
+                        .checked_add(offset)
                         .ok_or(MachineError::StackUnderFlow)?;
                     let value = *stack
-                        .get(index)
+                        .get(index as usize)
                         .ok_or(MachineError::StackUnderFlow)?;
                     push(stack, value)?;
                 }
                 Ops::StackStore => {
                     pc = next_pc(pc)?;
-                    let offset = read_static(pc, self.static_data)? as usize;
-                    let index = stack
-                        .len()
-                        .checked_sub(1)
-                        .and_then(|top| top.checked_sub(offset))
+                    let offset = read_static(pc, self.static_data)?;
+                    let index = self
+                        .frame_pointer
+                        .checked_add(offset)
                         .ok_or(MachineError::StackUnderFlow)?;
                     let value = *stack.last().ok_or(MachineError::StackUnderFlow)?;
                     let slot = stack
-                        .get_mut(index)
+                        .get_mut(index as usize)
                         .ok_or(MachineError::StackUnderFlow)?;
                     *slot = value;
                     let _ = pop(stack)?;
@@ -520,13 +523,68 @@ impl<'a, 'b> Program<'a, 'b> {
                     push(stack, rhs)?;
                     push(stack, lhs)?;
                 }
-                Ops::Exit => break,
+                Ops::Exit => {
+                    self.frame_pointer = 0;
+                    break
+                }
                 Ops::Call => {
+                    // Stack convention: ... args, arg_count, func_index
                     let function_index = pop(stack)? as usize;
+                    let arg_count = pop(stack)? as usize;
+                    let arg_start = stack
+                        .len()
+                        .checked_sub(arg_count)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    // Save current frame pointer so the callee can access its caller frame.
+                    let saved_frame_pointer = self.frame_pointer;
+                    // Precompute return PC so it can be pushed ahead of the callee's args.
+                    let return_pc = next_pc(pc)? as Word;
+                    // Insert return PC before the first argument for this call frame layout:
+                    // [return_pc, saved_fp, arg0, arg1, ...]
+                    stack
+                        .insert(arg_start, return_pc)
+                        .map_err(|_| MachineError::StackOverflow)?;
+                    // Insert saved FP immediately after return PC.
+                    let saved_pointer_index = arg_start
+                        .checked_add(1)
+                        .ok_or(MachineError::StackOverflow)?;
+                    stack
+                        .insert(saved_pointer_index, saved_frame_pointer)
+                        .map_err(|_| MachineError::StackOverflow)?;
+                    // Frame pointer points at arg0, which is now shifted by two slots.
+                    let new_frame_pointer = arg_start
+                        .checked_add(2)
+                        .ok_or(MachineError::StackOverflow)?;
+                    // Convert usize->Word safely; Word limits keep stack indexing bounded.
+                    let new_frame_pointer =
+                        Word::try_from(new_frame_pointer).map_err(|_| MachineError::StackOverflow)?;
+                    self.frame_pointer = new_frame_pointer;
                     let entry_point = self.get_function_entry(machine_number, function_index)?;
-                    let return_pc = next_pc(pc)?;
                     self.run(machine_number, entry_point, stack)?;
-                    pc = return_pc;
+                    // Restore caller's frame pointer after returning.
+                    self.frame_pointer = saved_frame_pointer;
+                    pc = return_pc as usize;
+                    continue;
+                }
+                Ops::Return => {
+                    let fp_index = usize::from(self.frame_pointer);
+                    let return_pc_index = fp_index
+                        .checked_sub(2)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    let saved_fp_index = fp_index
+                        .checked_sub(1)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    let return_pc = *stack
+                        .get(return_pc_index)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    let saved_frame_pointer = *stack
+                        .get(saved_fp_index)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    // Remove return_pc and saved FP from the stack.
+                    let _ = stack.remove(return_pc_index);
+                    let _ = stack.remove(return_pc_index);
+                    self.frame_pointer = saved_frame_pointer;
+                    pc = return_pc as usize;
                     continue;
                 }
             }

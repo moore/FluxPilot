@@ -79,8 +79,9 @@ Stack ops:
 - `POP`                 ; Pop and discard
 - `DUP`                 ; Duplicate top of stack
 - `SWAP`                ; Swap top two values
-- `SLOAD <offset>`      ; Push stack[top - offset] (2 words total)
-- `SSTORE <offset>`     ; Store top at stack[top - offset] (2 words total)
+- `RET`                 ; Return via saved frame pointer and return PC
+- `SLOAD <offset>`      ; Push stack[frame_pointer + offset] (2 words total)
+- `SSTORE <offset>`     ; Store top at stack[frame_pointer + offset] (2 words total)
 
 Globals ops:
 
@@ -94,7 +95,7 @@ Static ops:
 Control flow:
 
 - `JUMP`                ; Pop addr, jump to absolute word index
-- `CALL`                ; Pop function index, call function and return
+- `CALL`                ; Pop function index + arg count (stack: ... args, arg_count, func_index)
 - `BRLT`                ; Pop addr and compare a < b
 - `BRLTE`               ; Pop addr and compare a <= b
 - `BRGT`                ; Pop addr and compare a > b
@@ -121,11 +122,12 @@ Only these are executed today:
 - `SWAP`: swap top two values, error if fewer than 2.
 - `LOAD <addr>`: read globals[addr], push; error if addr out of range.
 - `STORE <addr>`: pop and store to globals[addr], error if empty/out of range.
-- `SLOAD <offset>`: push stack[top - offset], error if out of range.
-- `SSTORE <offset>`: store top into stack[top - offset], error if out of range.
+- `SLOAD <offset>`: push stack[frame_pointer + offset], error if out of range.
+- `SSTORE <offset>`: store top into stack[frame_pointer + offset], error if out of range.
 - `LOAD_STATIC`: pop addr, push static_data[addr].
 - `JUMP`: pop addr and jump.
-- `CALL`: pop function index, call function, resume after.
+- `CALL`: pop function index + arg count (stack: ... args, arg_count, func_index), insert return PC and saved frame pointer before args, set frame pointer to first arg, call function, resume after.
+- `RET`: load return PC + saved frame pointer using frame pointer, remove them from stack, restore frame pointer, jump to return PC.
 - `BRLT`/`BRLTE`/`BRGT`/`BRGTE`/`BREQ`: pop addr and compare.
 - `ADD`/`SUB`/`MUL`/`DIV`/`MOD`: pop two values, push arithmetic result.
 - `EXIT`: return from function.
@@ -186,7 +188,7 @@ Whitespace and comments can appear between any tokens.
     data_word      = ".word" number | number ;
     operand        = number | ident ;
 
-    mnemonic       = "PUSH" | "POP" | "DUP" | "SWAP" | "SLOAD" | "SSTORE" | "LOAD" | "STORE" | "LOAD_STATIC"
+    mnemonic       = "PUSH" | "POP" | "DUP" | "SWAP" | "RET" | "SLOAD" | "SSTORE" | "LOAD" | "STORE" | "LOAD_STATIC"
                    | "JUMP" | "CALL" | "BRLT" | "BRLTE" | "BRGT" | "BRGTE" | "BREQ"
                    | "EXIT"
                    | "AND" | "OR" | "XOR" | "NOT"

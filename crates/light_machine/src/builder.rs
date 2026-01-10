@@ -312,6 +312,7 @@ pub enum Op {
     StackStore(Word),
     Dup,
     Swap,
+    Return,
     BranchLessThan,
     BranchLessThanEq,
     BranchGreaterThan,
@@ -407,6 +408,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             }
             Op::Swap => {
                 self.machine.add_word(Ops::Swap.into())?;
+            }
+            Op::Return => {
+                self.machine.add_word(Ops::Return.into())?;
             }
             Op::BranchLessThan => {
                 self.machine.add_word(Ops::BranchLessThan.into())?;
