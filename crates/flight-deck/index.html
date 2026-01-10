@@ -1,69 +1,307 @@
-<!doctype html>
-<html lang="en-US">
+<!DOCTYPE html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Flight Deck</title>
-    <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f5f5; }
-        .buttons { display: flex; flex-wrap: wrap; gap: 1rem; width: 100%; max-width: 600px; margin-top: 1rem; }
-        button { flex: 1 1 calc(50% - 1rem); padding: 1rem; font-size: 1.25rem; border: none; border-radius: 8px; color: white; cursor: pointer; }
-        #red { background: red; } #green { background: green; } #blue { background: blue; }
-        #connect { padding: 0.25rem 0.5rem; font-size: 0.9rem; max-width: 120px; flex: none; border-radius: 6px; background: #333; color: white; }
-        #load-program { background: #1b1b1b; }
-        .slider-wrap { margin-top: 1rem; width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 0.5rem; }
-        .slider-label { font-size: 0.95rem; color: #222; display: flex; justify-content: space-between; }
-        #color-slider { width: 100%; -webkit-appearance: none; appearance: none; background: transparent; }
-        #color-slider::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #0033ff, #00ff00, #ff0000); }
-        #color-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #111; margin-top: -4px; }
-        #color-slider::-moz-range-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #0033ff, #00ff00, #ff0000); }
-        #color-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #111; border: none; }
-        #brightness-slider { width: 100%; -webkit-appearance: none; appearance: none; background: transparent; }
-        #brightness-slider::-webkit-slider-runnable-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #111, #eee); }
-        #brightness-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #111; margin-top: -4px; }
-        #brightness-slider::-moz-range-track { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #111, #eee); }
-        #brightness-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #111; border: none; }
-        .editor-wrap { margin-top: 1rem; width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 0.5rem; }
-        #program-editor { width: 100%; min-height: 180px; font-family: monospace; font-size: 1rem; padding: 0.75rem; border-radius: 8px; border: 1px solid #ccc; resize: vertical; }
-        #status { margin-top: 1rem; color: #b00; text-align: center; max-width: 90%; white-space: pre-wrap; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Flight Deck Prototype</title>
+    <link rel="stylesheet" href="index.css" />
   </head>
   <body>
-    
-    <div class="editor-wrap">
-        <div class="slider-label">
-            <span>Program Editor</span>
+    <fd-app class="shell">
+      <header class="fade-in">
+        <div class="brand">
+          <div class="status-pill">
+            <span class="status-dot"></span>
+            Connected to Device 01 · 120 FPS
+          </div>
+          <h1>Flight Deck</h1>
+          <p>
+            Track-driven lighting control. Assign machines, tune their parameters,
+            and orchestrate LED behavior like a live performance.
+          </p>
         </div>
-        <textarea id="program-editor" spellcheck="false"></textarea>
-    </div>
-    <button id="connect">Connect Device</button>
-    <div class="buttons">
-        <button id="load-program" disabled>Load Program</button>
-        <button id="red" disabled>Red</button>
-        <button id="green" disabled>Green</button>
-        <button id="blue" disabled>Blue</button>
-    </div>
-    <div class="slider-wrap">
-        <div class="slider-label">
-            <span>Color Slider</span>
-            <span id="slider-value">0</span>
+        <div class="actions">
+          <button class="button primary" id="connect">Connect Device</button>
+          <button class="button" id="load-program" disabled>Load Program</button>
+          <button class="button">Record</button>
+          <button class="button">Settings</button>
         </div>
-        <input id="color-slider" type="range" min="0" max="1023" value="0" disabled />
-    </div>
-    <div class="slider-wrap">
-        <div class="slider-label">
-            <span>Brightness</span>
-            <span id="brightness-value">10%</span>
-        </div>
-        <input id="brightness-slider" type="range" min="0" max="100" value="10" disabled />
-    </div>
-    <div id="status" role="alert"></div>
+      </header>
+
+      <main>
+        <section class="panel fade-in">
+          <div class="panel-header">
+            <h2>Tracks</h2>
+            <button class="button add-track" id="add-track" type="button">Add Track</button>
+          </div>
+          <p class="panel-subtitle">
+            Stack lighting tracks, assign machines, then tweak speed, hue, and gain to build a live
+            look.
+          </p>
+          <div class="track-list stagger" id="track-list">
+            <fd-track>
+              <div class="track-machine">
+                <div class="track-header">
+                  <strong>Assembler Program</strong>
+                  <div class="track-actions">
+                    <div class="track-controls">
+                      <span class="chip">Speed 0.8x</span>
+                      <span class="chip">Hue +14</span>
+                      <span class="chip">Gain 70%</span>
+                    </div>
+                    <button class="track-delete" type="button">Remove</button>
+                  </div>
+                </div>
+                <span class="chip">Machine 01 · 3 funcs</span>
+              </div>
+            </fd-track>
+            <fd-track>
+              <div class="track-machine">
+                <div class="track-header">
+                  <strong>Arc Pulse</strong>
+                  <div class="track-actions">
+                    <div class="track-controls">
+                      <span class="chip">Speed 1.2x</span>
+                      <span class="chip">Tint Warm</span>
+                    </div>
+                    <button class="track-delete" type="button">Remove</button>
+                  </div>
+                </div>
+                <span class="chip">Machine B · 5 funcs</span>
+              </div>
+            </fd-track>
+            <fd-track>
+              <div class="track-machine">
+                <div class="track-header">
+                  <strong>Scanline Drift</strong>
+                  <div class="track-actions">
+                    <div class="track-controls">
+                      <span class="chip">Speed 0.6x</span>
+                      <span class="chip">Phase 42%</span>
+                      <span class="chip">Mask 8</span>
+                    </div>
+                    <button class="track-delete" type="button">Remove</button>
+                  </div>
+                </div>
+                <span class="chip">Machine C · 2 funcs</span>
+              </div>
+            </fd-track>
+            <fd-track>
+              <div class="track-machine">
+                <div class="track-header">
+                  <strong>No Machine</strong>
+                  <div class="track-actions">
+                    <div class="track-controls">
+                      <span class="chip">Idle</span>
+                    </div>
+                    <button class="track-delete" type="button">Remove</button>
+                  </div>
+                </div>
+                <span class="chip">Assign a machine</span>
+              </div>
+            </fd-track>
+          </div>
+          <div class="live-controls">
+            <div class="control-header">
+              <h3>Live Controls</h3>
+              <span class="chip">Machine 01 Active</span>
+            </div>
+            <div class="color-buttons">
+              <button class="button color-button" id="red" disabled>Red</button>
+              <button class="button color-button" id="green" disabled>Green</button>
+              <button class="button color-button" id="blue" disabled>Blue</button>
+            </div>
+            <div class="slider-wrap">
+              <div class="slider-label">
+                <span>Color Slider</span>
+                <span id="slider-value">0</span>
+              </div>
+              <input id="color-slider" type="range" min="0" max="1023" value="0" disabled />
+            </div>
+            <div class="slider-wrap">
+              <div class="slider-label">
+                <span>Brightness</span>
+                <span id="brightness-value">10%</span>
+              </div>
+              <input id="brightness-slider" type="range" min="0" max="100" value="10" disabled />
+            </div>
+            <div id="status" class="status-message" role="alert"></div>
+          </div>
+        </section>
+
+        <div class="rack-scrim" id="rack-scrim" aria-hidden="true"></div>
+        <section class="panel secondary machine-rack" aria-hidden="true">
+          <div class="panel-header">
+            <h2>Machine Rack</h2>
+            <button class="button rack-close" id="close-rack" type="button">Done</button>
+          </div>
+          <div class="assembler">
+            <div class="assembler-header">
+              <h3>Assembler</h3>
+              <span class="chip">Active Program</span>
+            </div>
+            <textarea id="program-editor" spellcheck="false"></textarea>
+          </div>
+          <div class="machine-card" draggable="true">
+            <h3>Machine 01 · Assembler Program</h3>
+            <p>Compiled from the assembler editor and loaded into the live deck.</p>
+            <button class="machine-add" type="button">Add to Tracks</button>
+          </div>
+          <div class="machine-card" draggable="true">
+            <h3>Machine B · Arc Pulse</h3>
+            <p>Sharp rhythmic pulses with tempo-synced intensity.</p>
+            <button class="machine-add" type="button">Add to Tracks</button>
+          </div>
+          <div class="machine-card" draggable="true">
+            <h3>Machine C · Scanline Drift</h3>
+            <p>Horizontal scan patterns with phase offsets per LED.</p>
+            <button class="machine-add" type="button">Add to Tracks</button>
+          </div>
+          <div class="machine-card" draggable="true">
+            <h3>Machine D · (Draft)</h3>
+            <p>Placeholder for new machine assembly definitions.</p>
+            <button class="machine-add" type="button">Add to Tracks</button>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <span>Build 0.4.2 · light_machine v0.9</span>
+        <span>Assembler Ready · 12 Machines Available</span>
+      </footer>
+    </fd-app>
+
+    <script>
+      class FlightDeckApp extends HTMLElement {}
+      class FlightDeckTrack extends HTMLElement {}
+      customElements.define("fd-app", FlightDeckApp);
+      customElements.define("fd-track", FlightDeckTrack);
+    </script>
     <script type="module">
-        import {consumeQueue, initDeck} from "/deck.js";
-        (async () => {
-            await initDeck();
-            await consumeQueue();
-        })();
+      import { consumeQueue, initDeck } from "/deck.js";
+      const trackList = document.getElementById("track-list");
+      const machineCards = document.querySelectorAll(".machine-card");
+      const addTrackBtn = document.getElementById("add-track");
+      const closeRackBtn = document.getElementById("close-rack");
+      const rackScrim = document.getElementById("rack-scrim");
+      const shell = document.querySelector("fd-app");
+      const rackPanel = document.querySelector(".machine-rack");
+      let dragPayload = null;
+
+      const bindTrackDelete = (track) => {
+        const deleteBtn = track.querySelector(".track-delete");
+        if (!deleteBtn) {
+          return;
+        }
+        deleteBtn.addEventListener("click", () => {
+          track.remove();
+        });
+      };
+
+      const extractMachineInfo = (card) => {
+        const title = card.querySelector("h3")?.textContent?.trim() ?? "Machine";
+        let name = title;
+        let meta = "Rack Copy";
+        if (title.includes("·")) {
+          const parts = title.split("·");
+          name = parts.slice(1).join("·").trim() || title;
+          meta = parts[0].trim();
+        }
+        const desc = card.querySelector("p")?.textContent?.trim() ?? "";
+        return { name, meta, desc };
+      };
+
+      const createTrack = ({ name, meta }) => {
+        const track = document.createElement("fd-track");
+        track.innerHTML = `
+          <div class="track-machine">
+            <div class="track-header">
+              <strong>${name}</strong>
+              <div class="track-actions">
+                <div class="track-controls">
+                  <span class="chip">Speed 1.0x</span>
+                  <span class="chip">Hue +0</span>
+                  <span class="chip">Gain 60%</span>
+                </div>
+                <button class="track-delete" type="button">Remove</button>
+              </div>
+            </div>
+            <span class="chip">${meta} · from rack</span>
+          </div>
+        `;
+        return track;
+      };
+
+      const addTrackFromCard = (card) => {
+        if (!trackList) {
+          return;
+        }
+        const info = extractMachineInfo(card);
+        const newTrack = createTrack(info);
+        trackList.appendChild(newTrack);
+        bindTrackDelete(newTrack);
+      };
+
+      if (trackList) {
+        trackList.querySelectorAll("fd-track").forEach(bindTrackDelete);
+        trackList.addEventListener("dragover", (event) => {
+          event.preventDefault();
+          trackList.classList.add("drag-over");
+        });
+        trackList.addEventListener("dragleave", () => {
+          trackList.classList.remove("drag-over");
+        });
+        trackList.addEventListener("drop", (event) => {
+          event.preventDefault();
+          trackList.classList.remove("drag-over");
+          if (!dragPayload) {
+            return;
+          }
+          const newTrack = createTrack(dragPayload);
+          trackList.appendChild(newTrack);
+          bindTrackDelete(newTrack);
+          dragPayload = null;
+        });
+      }
+
+      machineCards.forEach((card) => {
+        const addButton = card.querySelector(".machine-add");
+        if (addButton) {
+          addButton.addEventListener("click", () => {
+            addTrackFromCard(card);
+          });
+        }
+        card.addEventListener("dragstart", (event) => {
+          dragPayload = extractMachineInfo(card);
+          event.dataTransfer?.setData("text/plain", dragPayload.name);
+          event.dataTransfer?.setData("text/metadata", dragPayload.meta);
+          event.dataTransfer?.setData("text/description", dragPayload.desc);
+          event.dataTransfer?.setDragImage(card, 16, 16);
+          card.classList.add("dragging");
+        });
+        card.addEventListener("dragend", () => {
+          card.classList.remove("dragging");
+        });
+      });
+
+      const openRack = () => {
+        shell?.classList.add("rack-open");
+        rackPanel?.setAttribute("aria-hidden", "false");
+      };
+
+      const closeRack = () => {
+        shell?.classList.remove("rack-open");
+        rackPanel?.setAttribute("aria-hidden", "true");
+      };
+
+      addTrackBtn?.addEventListener("click", openRack);
+      closeRackBtn?.addEventListener("click", closeRack);
+      rackScrim?.addEventListener("click", closeRack);
+
+      (async () => {
+        await initDeck();
+        await consumeQueue();
+      })();
     </script>
   </body>
 </html>
