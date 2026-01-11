@@ -1,3 +1,5 @@
+import { consumeQueue, initDeck } from "/deck.js";
+
 export class MachineControlDescriptor {
   constructor({
     id,
@@ -376,3 +378,112 @@ if (!customElements.get("fd-color-picker")) {
 }
 
 export { ColorPicker };
+
+export async function runUi() {
+  const trackList = document.getElementById("track-list");
+  const machineCards = document.querySelectorAll("fd-machine-card");
+  const addTrackBtn = document.getElementById("add-track");
+  const closeRackBtn = document.getElementById("close-rack");
+  const rackScrim = document.getElementById("rack-scrim");
+  const shell = document.querySelector("fd-app");
+  const rackPanel = document.querySelector(".machine-rack");
+  let dragPayload = null;
+
+  const extractMachineInfo = (card) => {
+    const title = card.getAttribute("title") ?? "Machine";
+    let name = title;
+    let meta = "Rack Copy";
+    if (title.includes("·")) {
+      const parts = title.split("·");
+      name = parts.slice(1).join("·").trim() || title;
+      meta = parts[0].trim();
+    }
+    const desc = card.getAttribute("description") ?? "";
+    return { name, meta, desc };
+  };
+
+  const createTrack = ({ name, meta }) => {
+    const track = document.createElement("fd-track");
+    const machine = document.createElement("fd-track-machine");
+    machine.setAttribute("name", name);
+    machine.setAttribute("meta", `${meta} · from rack`);
+    machine.setAttribute("speed", "1.0x");
+    machine.setAttribute("hue", "+0");
+    machine.setAttribute("gain", "60%");
+    track.appendChild(machine);
+    return track;
+  };
+
+  const addTrackFromCard = (card) => {
+    if (!trackList) {
+      return;
+    }
+    const info = extractMachineInfo(card);
+    const newTrack = createTrack(info);
+    trackList.appendChild(newTrack);
+  };
+
+  if (trackList) {
+    trackList.addEventListener("track-remove", (event) => {
+      const track = event.target.closest("fd-track");
+      if (track) {
+        track.remove();
+      }
+    });
+    trackList.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      trackList.classList.add("drag-over");
+    });
+    trackList.addEventListener("dragleave", () => {
+      trackList.classList.remove("drag-over");
+    });
+    trackList.addEventListener("drop", (event) => {
+      event.preventDefault();
+      trackList.classList.remove("drag-over");
+      if (!dragPayload) {
+        return;
+      }
+      const newTrack = createTrack(dragPayload);
+      trackList.appendChild(newTrack);
+      dragPayload = null;
+    });
+  }
+
+  machineCards.forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      dragPayload = extractMachineInfo(card);
+      event.dataTransfer?.setData("text/plain", dragPayload.name);
+      event.dataTransfer?.setData("text/description", dragPayload.desc);
+      event.dataTransfer?.setDragImage(card, 16, 16);
+      card.classList.add("dragging");
+    });
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+    });
+  });
+
+  rackPanel?.addEventListener("add", (event) => {
+    const card = event.target.closest("fd-machine-card");
+    if (!card) {
+      return;
+    }
+    addTrackFromCard(card);
+  });
+
+  const openRack = () => {
+    shell?.classList.add("rack-open");
+    rackPanel?.setAttribute("aria-hidden", "false");
+  };
+
+  const closeRack = () => {
+    shell?.classList.remove("rack-open");
+    rackPanel?.setAttribute("aria-hidden", "true");
+  };
+
+  addTrackBtn?.addEventListener("click", openRack);
+  closeRackBtn?.addEventListener("click", closeRack);
+  rackScrim?.addEventListener("click", closeRack);
+
+  await initDeck();
+  await consumeQueue();
+}
