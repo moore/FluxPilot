@@ -42,7 +42,6 @@
             <fd-track>
               <fd-track-machine
                 name="No Machine"
-                meta="Assign a machine"
                 speed="Idle"
                 hue="--"
                 gain="--"
@@ -126,40 +125,16 @@
       const rackPanel = document.querySelector(".machine-rack");
       let dragPayload = null;
 
-      const bindTrackDelete = (track) => {
-        const deleteBtn = track.querySelector(".track-delete");
-        if (!deleteBtn) {
-          return;
-        }
-        deleteBtn.addEventListener("click", () => {
-          track.remove();
-        });
-      };
-
       const extractMachineInfo = (card) => {
-        const title =
-          card.getAttribute("title") ??
-          card.querySelector("h3")?.textContent?.trim() ??
-          "Machine";
-        let name = title;
-        let meta = "Rack Copy";
-        if (title.includes("·")) {
-          const parts = title.split("·");
-          name = parts.slice(1).join("·").trim() || title;
-          meta = parts[0].trim();
-        }
-        const desc =
-          card.getAttribute("description") ??
-          card.querySelector("p")?.textContent?.trim() ??
-          "";
-        return { name, meta, desc };
+        const name = card.getAttribute("title") ?? "Machine";
+        const desc = card.getAttribute("description") ?? "";
+        return { name, desc };
       };
 
-      const createTrack = ({ name, meta }) => {
+      const createTrack = ({ name, desc }) => {
         const track = document.createElement("fd-track");
         const machine = document.createElement("fd-track-machine");
         machine.setAttribute("name", name);
-        machine.setAttribute("meta", `${meta} · from rack`);
         machine.setAttribute("speed", "1.0x");
         machine.setAttribute("hue", "+0");
         machine.setAttribute("gain", "60%");
@@ -174,21 +149,15 @@
         const info = extractMachineInfo(card);
         const newTrack = createTrack(info);
         trackList.appendChild(newTrack);
-        bindTrackDelete(newTrack);
       };
 
       if (trackList) {
-        trackList.addEventListener("click", (event) => {
-          const deleteBtn = event.target.closest(".track-delete");
-          if (!deleteBtn) {
-            return;
-          }
-          const track = deleteBtn.closest("fd-track");
+        trackList.addEventListener("track-remove", (event) => {
+          const track = event.target.closest("fd-track");
           if (track) {
             track.remove();
           }
         });
-        trackList.querySelectorAll("fd-track").forEach(bindTrackDelete);
         trackList.addEventListener("dragover", (event) => {
           event.preventDefault();
           trackList.classList.add("drag-over");
@@ -204,7 +173,6 @@
           }
           const newTrack = createTrack(dragPayload);
           trackList.appendChild(newTrack);
-          bindTrackDelete(newTrack);
           dragPayload = null;
         });
       }
@@ -213,7 +181,6 @@
         card.addEventListener("dragstart", (event) => {
           dragPayload = extractMachineInfo(card);
           event.dataTransfer?.setData("text/plain", dragPayload.name);
-          event.dataTransfer?.setData("text/metadata", dragPayload.meta);
           event.dataTransfer?.setData("text/description", dragPayload.desc);
           event.dataTransfer?.setDragImage(card, 16, 16);
           card.classList.add("dragging");
@@ -223,12 +190,8 @@
         });
       });
 
-      rackPanel?.addEventListener("click", (event) => {
-        const button = event.target.closest(".machine-add");
-        if (!button) {
-          return;
-        }
-        const card = button.closest("fd-machine-card");
+      rackPanel?.addEventListener("add", (event) => {
+        const card = event.target.closest("fd-machine-card");
         if (!card) {
           return;
         }
