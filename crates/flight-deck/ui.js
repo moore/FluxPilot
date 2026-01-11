@@ -1,4 +1,4 @@
-import { consumeQueue, initDeck } from "/deck.js";
+import { consumeQueue, initDeck, autoConnect } from "/deck.js";
 
 export class MachineControlDescriptor {
   constructor({
@@ -530,5 +530,6 @@ export async function runUi() {
   rackScrim?.addEventListener("click", closeRack);
 
   await initDeck();
+  await autoConnect();
   await consumeQueue();
 }

@@ -275,42 +275,56 @@ export async function connect() {
         ];
         
         const device = await navigator.usb.requestDevice({ filters });
-        await device.open();
-        
-        // Try to select the first available configuration
-        if (device.configuration === null) {
-            await device.selectConfiguration(1);
-        }
-        
-        const ifaceInfo = findUsbInterface(device);
-        if (!ifaceInfo) {
-            throw new Error('No suitable USB interface with bulk IN/OUT endpoints');
-        }
-        const { interfaceNumber, alternateSetting, inEndpoint, outEndpoint } = ifaceInfo;
-
-        await device.claimInterface(interfaceNumber);
-        if (alternateSetting !== 0) {
-            await device.selectAlternateInterface(interfaceNumber, alternateSetting);
-        }
-        /*
-        // Try to claim interface, handling if it's already claimed
-        try {
-            await device.claimInterface(interfaces[0].interfaceNumber);
-        } catch (claimError) {
-            console.warn('Interface claim failed, trying interface 0:', claimError);
-            // Fallback to interface 1 if the first interface fails
-            await device.claimInterface(1);
-        }*/
-        writer = { device, type: 'usb', inEndpoint, outEndpoint };
-        startUsbReceiveLoop(device);
-        enableControls();
-        setConnectionState(true);
-        setStatus('Connected via WebUSB. Tap a color.');
+        await connectUsbDevice(device);
     } catch (err) {
         console.error('Connect error:', err);
         setConnectionState(false);
         disableControls();
         setStatus('Connection failed: ' + (err.message || err));
+    }
+}
+
+async function connectUsbDevice(device) {
+    if (!device) {
+        return;
+    }
+    await device.open();
+
+    // Try to select the first available configuration
+    if (device.configuration === null) {
+        await device.selectConfiguration(1);
+    }
+
+    const ifaceInfo = findUsbInterface(device);
+    if (!ifaceInfo) {
+        throw new Error('No suitable USB interface with bulk IN/OUT endpoints');
+    }
+    const { interfaceNumber, alternateSetting, inEndpoint, outEndpoint } = ifaceInfo;
+
+    await device.claimInterface(interfaceNumber);
+    if (alternateSetting !== 0) {
+        await device.selectAlternateInterface(interfaceNumber, alternateSetting);
+    }
+
+    writer = { device, type: 'usb', inEndpoint, outEndpoint };
+    startUsbReceiveLoop(device);
+    enableControls();
+    setConnectionState(true);
+    setStatus('Connected via WebUSB. Tap a color.');
+}
+
+export async function autoConnect() {
+    if (!('usb' in navigator) || !window.isSecureContext) {
+        return;
+    }
+    try {
+        const devices = await navigator.usb.getDevices();
+        if (!devices.length) {
+            return;
+        }
+        await connectUsbDevice(devices[0]);
+    } catch (err) {
+        console.error('Auto-connect error:', err);
     }
 }
 
@@ -458,6 +472,9 @@ if (!('serial' in navigator) && !('usb' in navigator)) {
 }
 
 if ('usb' in navigator) {
+    navigator.usb.addEventListener('connect', () => {
+        autoConnect();
+    });
     navigator.usb.addEventListener('disconnect', () => {
         handleDisconnect('Device disconnected.');
     });
