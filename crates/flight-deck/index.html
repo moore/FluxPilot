@@ -12,7 +12,7 @@
         <div class="brand">
           <div class="status-pill">
             <span class="status-dot"></span>
-            Connected to Device 01 · 120 FPS
+            Connected to Device 01
           </div>
           <h1>Flight Deck</h1>
           <p>
@@ -40,65 +40,13 @@
           </p>
           <div class="track-list stagger" id="track-list">
             <fd-track>
-              <div class="track-machine">
-                <div class="track-header">
-                  <strong>Assembler Program</strong>
-                  <div class="track-actions">
-                    <div class="track-controls">
-                      <span class="chip">Speed 0.8x</span>
-                      <span class="chip">Hue +14</span>
-                      <span class="chip">Gain 70%</span>
-                    </div>
-                    <button class="track-delete" type="button">Remove</button>
-                  </div>
-                </div>
-                <span class="chip">Machine 01 · 3 funcs</span>
-              </div>
-            </fd-track>
-            <fd-track>
-              <div class="track-machine">
-                <div class="track-header">
-                  <strong>Arc Pulse</strong>
-                  <div class="track-actions">
-                    <div class="track-controls">
-                      <span class="chip">Speed 1.2x</span>
-                      <span class="chip">Tint Warm</span>
-                    </div>
-                    <button class="track-delete" type="button">Remove</button>
-                  </div>
-                </div>
-                <span class="chip">Machine B · 5 funcs</span>
-              </div>
-            </fd-track>
-            <fd-track>
-              <div class="track-machine">
-                <div class="track-header">
-                  <strong>Scanline Drift</strong>
-                  <div class="track-actions">
-                    <div class="track-controls">
-                      <span class="chip">Speed 0.6x</span>
-                      <span class="chip">Phase 42%</span>
-                      <span class="chip">Mask 8</span>
-                    </div>
-                    <button class="track-delete" type="button">Remove</button>
-                  </div>
-                </div>
-                <span class="chip">Machine C · 2 funcs</span>
-              </div>
-            </fd-track>
-            <fd-track>
-              <div class="track-machine">
-                <div class="track-header">
-                  <strong>No Machine</strong>
-                  <div class="track-actions">
-                    <div class="track-controls">
-                      <span class="chip">Idle</span>
-                    </div>
-                    <button class="track-delete" type="button">Remove</button>
-                  </div>
-                </div>
-                <span class="chip">Assign a machine</span>
-              </div>
+              <fd-track-machine
+                name="No Machine"
+                meta="Assign a machine"
+                speed="Idle"
+                hue="--"
+                gain="--"
+              ></fd-track-machine>
             </fd-track>
           </div>
           <div class="live-controls">
@@ -130,39 +78,28 @@
         </section>
 
         <div class="rack-scrim" id="rack-scrim" aria-hidden="true"></div>
-        <section class="panel secondary machine-rack" aria-hidden="true">
+        <fd-machine-rack class="panel secondary machine-rack" aria-hidden="true">
           <div class="panel-header">
             <h2>Machine Rack</h2>
             <button class="button rack-close" id="close-rack" type="button">Done</button>
           </div>
-          <div class="assembler">
-            <div class="assembler-header">
-              <h3>Assembler</h3>
-              <span class="chip">Active Program</span>
-            </div>
-            <textarea id="program-editor" spellcheck="false"></textarea>
-          </div>
-          <div class="machine-card" draggable="true">
-            <h3>Machine 01 · Assembler Program</h3>
-            <p>Compiled from the assembler editor and loaded into the live deck.</p>
-            <button class="machine-add" type="button">Add to Tracks</button>
-          </div>
-          <div class="machine-card" draggable="true">
-            <h3>Machine B · Arc Pulse</h3>
-            <p>Sharp rhythmic pulses with tempo-synced intensity.</p>
-            <button class="machine-add" type="button">Add to Tracks</button>
-          </div>
-          <div class="machine-card" draggable="true">
-            <h3>Machine C · Scanline Drift</h3>
-            <p>Horizontal scan patterns with phase offsets per LED.</p>
-            <button class="machine-add" type="button">Add to Tracks</button>
-          </div>
-          <div class="machine-card" draggable="true">
-            <h3>Machine D · (Draft)</h3>
-            <p>Placeholder for new machine assembly definitions.</p>
-            <button class="machine-add" type="button">Add to Tracks</button>
-          </div>
-        </section>
+          <fd-machine-card
+            title="Machine 01 · Assembler Program"
+            description="Compiled from the assembler editor and loaded into the live deck."
+          ></fd-machine-card>
+          <fd-machine-card
+            title="Machine B · Arc Pulse"
+            description="Sharp rhythmic pulses with tempo-synced intensity."
+          ></fd-machine-card>
+          <fd-machine-card
+            title="Machine C · Scanline Drift"
+            description="Horizontal scan patterns with phase offsets per LED."
+          ></fd-machine-card>
+          <fd-machine-card
+            title="Machine D · (Draft)"
+            description="Placeholder for new machine assembly definitions."
+          ></fd-machine-card>
+        </fd-machine-rack>
       </main>
 
       <footer>
@@ -178,9 +115,10 @@
       customElements.define("fd-track", FlightDeckTrack);
     </script>
     <script type="module">
+      import "/ui.js";
       import { consumeQueue, initDeck } from "/deck.js";
       const trackList = document.getElementById("track-list");
-      const machineCards = document.querySelectorAll(".machine-card");
+      const machineCards = document.querySelectorAll("fd-machine-card");
       const addTrackBtn = document.getElementById("add-track");
       const closeRackBtn = document.getElementById("close-rack");
       const rackScrim = document.getElementById("rack-scrim");
@@ -199,7 +137,10 @@
       };
 
       const extractMachineInfo = (card) => {
-        const title = card.querySelector("h3")?.textContent?.trim() ?? "Machine";
+        const title =
+          card.getAttribute("title") ??
+          card.querySelector("h3")?.textContent?.trim() ??
+          "Machine";
         let name = title;
         let meta = "Rack Copy";
         if (title.includes("·")) {
@@ -207,28 +148,22 @@
           name = parts.slice(1).join("·").trim() || title;
           meta = parts[0].trim();
         }
-        const desc = card.querySelector("p")?.textContent?.trim() ?? "";
+        const desc =
+          card.getAttribute("description") ??
+          card.querySelector("p")?.textContent?.trim() ??
+          "";
         return { name, meta, desc };
       };
 
       const createTrack = ({ name, meta }) => {
         const track = document.createElement("fd-track");
-        track.innerHTML = `
-          <div class="track-machine">
-            <div class="track-header">
-              <strong>${name}</strong>
-              <div class="track-actions">
-                <div class="track-controls">
-                  <span class="chip">Speed 1.0x</span>
-                  <span class="chip">Hue +0</span>
-                  <span class="chip">Gain 60%</span>
-                </div>
-                <button class="track-delete" type="button">Remove</button>
-              </div>
-            </div>
-            <span class="chip">${meta} · from rack</span>
-          </div>
-        `;
+        const machine = document.createElement("fd-track-machine");
+        machine.setAttribute("name", name);
+        machine.setAttribute("meta", `${meta} · from rack`);
+        machine.setAttribute("speed", "1.0x");
+        machine.setAttribute("hue", "+0");
+        machine.setAttribute("gain", "60%");
+        track.appendChild(machine);
         return track;
       };
 
@@ -243,6 +178,16 @@
       };
 
       if (trackList) {
+        trackList.addEventListener("click", (event) => {
+          const deleteBtn = event.target.closest(".track-delete");
+          if (!deleteBtn) {
+            return;
+          }
+          const track = deleteBtn.closest("fd-track");
+          if (track) {
+            track.remove();
+          }
+        });
         trackList.querySelectorAll("fd-track").forEach(bindTrackDelete);
         trackList.addEventListener("dragover", (event) => {
           event.preventDefault();
@@ -265,12 +210,6 @@
       }
 
       machineCards.forEach((card) => {
-        const addButton = card.querySelector(".machine-add");
-        if (addButton) {
-          addButton.addEventListener("click", () => {
-            addTrackFromCard(card);
-          });
-        }
         card.addEventListener("dragstart", (event) => {
           dragPayload = extractMachineInfo(card);
           event.dataTransfer?.setData("text/plain", dragPayload.name);
@@ -282,6 +221,18 @@
         card.addEventListener("dragend", () => {
           card.classList.remove("dragging");
         });
+      });
+
+      rackPanel?.addEventListener("click", (event) => {
+        const button = event.target.closest(".machine-add");
+        if (!button) {
+          return;
+        }
+        const card = button.closest("fd-machine-card");
+        if (!card) {
+          return;
+        }
+        addTrackFromCard(card);
       });
 
       const openRack = () => {
