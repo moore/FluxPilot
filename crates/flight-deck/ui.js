@@ -35,7 +35,8 @@ export class MachineDescriptor {
   }
 }
 
-export const ASSEMBLER_PROGRAM = `
+
+export const CRAWLER_MACHINE = `
 .machine main globals 3 functions 2
 
     .func set_rgb index 0
@@ -46,6 +47,36 @@ export const ASSEMBLER_PROGRAM = `
     .end
 
     .func get_rgb index 1
+      PUSH 1000 ; count up 1 second
+      MOD
+      PUSH 40
+      DIV      ; scale to number of leds
+      BREQ matches
+      PUSH 0
+      PUSH 0
+      PUSH 0
+      EXIT
+      matches:
+      LOAD 0
+      LOAD 1
+      LOAD 2
+      EXIT
+    .end
+
+.end
+`;
+
+export const ASSEMBLER_PROGRAM = `
+.machine main globals 3 functions 2
+
+    .func set_rgb index 0
+      STORE 0
+      STORE 1
+      STORE 2
+      EXIT
+    .end
+
+    .func get_rgb index 1 ; Stack [index, tick]
       DUP
       PUSH 120
       MOD
@@ -72,6 +103,9 @@ export const ASSEMBLER_PROGRAM = `
 .end
 `;
 
+
+
+
 export const DEFAULT_MACHINE_RACK = [
   new MachineDescriptor({
     id: "FixedColorMachine",
@@ -89,6 +123,12 @@ export const DEFAULT_MACHINE_RACK = [
         defaultValue: 120,
       }),
     ],
+  }),
+  new MachineDescriptor({
+    id: "CrawlerMachine",
+    name: "Crawler",
+    assembly: CRAWLER_MACHINE,
+    controls: [],
   }),
 ];
 
@@ -112,10 +152,15 @@ trackTpl.innerHTML = `
           <span class="chip track-hue"></span>
           <span class="chip track-gain"></span>
         </div>
+        <button class="track-edit" type="button">Edit</button>
         <button class="track-delete" type="button">Remove</button>
       </div>
     </div>
     <span class="chip track-meta"></span>
+    <div class="track-editor">
+      <label>Assembly</label>
+      <textarea spellcheck="false" placeholder=".machine main globals 0 functions 0"></textarea>
+    </div>
   </div>
 `;
 
@@ -262,6 +307,10 @@ class TrackMachine extends HTMLElement {
   #hueEl;
   #gainEl;
   #removeBtn;
+  #editBtn;
+  #editorWrap;
+  #editorField;
+  #isExpanded = false;
 
   constructor() {
     super();
@@ -273,15 +322,30 @@ class TrackMachine extends HTMLElement {
     this.#hueEl = root.querySelector(".track-hue");
     this.#gainEl = root.querySelector(".track-gain");
     this.#removeBtn = root.querySelector(".track-delete");
+    this.#editBtn = root.querySelector(".track-edit");
+    this.#editorWrap = root.querySelector(".track-editor");
+    this.#editorField = root.querySelector("textarea");
     this.#removeBtn.addEventListener("click", () => {
       this.dispatchEvent(
         new CustomEvent("track-remove", { bubbles: true, composed: true })
       );
     });
+    this.#editBtn.addEventListener("click", () => {
+      this.toggleEditor();
+    });
+    this.#editorField.addEventListener("input", () => {
+      const track = this.closest("fd-track");
+      if (!track) {
+        return;
+      }
+      track.dataset.machineAssembly = this.#editorField.value;
+      track.dataset.machineSource = "manual";
+    });
   }
 
   connectedCallback() {
     this.render();
+    this.syncEditor();
   }
 
   attributeChangedCallback() {
@@ -299,6 +363,28 @@ class TrackMachine extends HTMLElement {
     this.#speedEl.textContent = `Speed ${speed}`;
     this.#hueEl.textContent = `Hue ${hue}`;
     this.#gainEl.textContent = `Gain ${gain}`;
+  }
+
+  toggleEditor() {
+    this.#isExpanded = !this.#isExpanded;
+    this.#editorWrap.classList.toggle("is-open", this.#isExpanded);
+    this.#editBtn.textContent = this.#isExpanded ? "Close" : "Edit";
+    if (this.#isExpanded) {
+      this.#editorField.focus();
+      this.#editorField.selectionStart = this.#editorField.value.length;
+      this.#editorField.selectionEnd = this.#editorField.value.length;
+    }
+  }
+
+  syncEditor() {
+    const track = this.closest("fd-track");
+    if (!track) {
+      return;
+    }
+    const assembly = track.dataset.machineAssembly || "";
+    if (this.#editorField.value !== assembly) {
+      this.#editorField.value = assembly;
+    }
   }
 }
 
@@ -433,8 +519,15 @@ export async function runUi() {
   const shell = document.querySelector("fd-app");
   const rackPanel = document.querySelector(".machine-rack");
   let dragPayload = null;
+  const machineRegistry = new Map(
+    DEFAULT_MACHINE_RACK.map((machine) => [machine.id, machine])
+  );
+  const defaultMachine = DEFAULT_MACHINE_RACK[0];
 
   const extractMachineInfo = (card) => {
+    const machineId = card.dataset.machineId || "";
+    const machineSource = card.dataset.machineSource || "";
+    const machine = machineRegistry.get(machineId);
     const title = card.getAttribute("title") ?? "Machine";
     let name = title;
     let meta = "Rack Copy";
@@ -444,10 +537,17 @@ export async function runUi() {
       meta = parts[0].trim();
     }
     const desc = card.getAttribute("description") ?? "";
-    return { name, meta, desc };
+    return {
+      name,
+      meta,
+      desc,
+      machineId,
+      assembly: machine?.assembly ?? "",
+      source: machineSource,
+    };
   };
 
-  const createTrack = ({ name, meta }) => {
+  const createTrack = ({ name, meta, machineId, assembly, source }) => {
     const track = document.createElement("fd-track");
     const machine = document.createElement("fd-track-machine");
     machine.setAttribute("name", name);
@@ -455,6 +555,15 @@ export async function runUi() {
     machine.setAttribute("speed", "1.0x");
     machine.setAttribute("hue", "+0");
     machine.setAttribute("gain", "60%");
+    if (machineId) {
+      track.dataset.machineId = machineId;
+    }
+    if (source) {
+      track.dataset.machineSource = source;
+    }
+    if (assembly) {
+      track.dataset.machineAssembly = assembly;
+    }
     track.appendChild(machine);
     return track;
   };
@@ -466,6 +575,26 @@ export async function runUi() {
     const info = extractMachineInfo(card);
     const newTrack = createTrack(info);
     trackList.appendChild(newTrack);
+  };
+
+  const hydrateDefaultTrack = () => {
+    if (!trackList || !defaultMachine) {
+      return;
+    }
+    const firstTrack = trackList.querySelector("fd-track");
+    if (!firstTrack || firstTrack.dataset.machineId) {
+      return;
+    }
+    const trackMachine = firstTrack.querySelector("fd-track-machine");
+    if (trackMachine) {
+      trackMachine.setAttribute("name", defaultMachine.name);
+      trackMachine.setAttribute("meta", "Rack Default · preloaded");
+      trackMachine.setAttribute("speed", "1.0x");
+      trackMachine.setAttribute("hue", "+0");
+      trackMachine.setAttribute("gain", "60%");
+    }
+    firstTrack.dataset.machineId = defaultMachine.id;
+    firstTrack.dataset.machineAssembly = defaultMachine.assembly || "";
   };
 
   if (trackList) {
@@ -493,6 +622,8 @@ export async function runUi() {
       dragPayload = null;
     });
   }
+
+  hydrateDefaultTrack();
 
   machineCards.forEach((card) => {
     card.addEventListener("dragstart", (event) => {

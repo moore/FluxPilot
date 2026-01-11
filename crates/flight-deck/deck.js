@@ -109,6 +109,47 @@ function setConnectionState(isConnected) {
     statusPillEl.setAttribute('state', isConnected ? 'connected' : 'disconnected');
 }
 
+function buildProgramSourceFromTracks() {
+    const trackList = document.getElementById('track-list');
+    if (!trackList) {
+        return { source: '', error: 'Track list not available.', isEmpty: true };
+    }
+    const tracks = Array.from(trackList.querySelectorAll('fd-track'));
+    const sources = [];
+    const missing = [];
+
+    tracks.forEach((track, index) => {
+        const machineId = track.dataset.machineId || '';
+        const machineAssembly = track.dataset.machineAssembly || '';
+        const machineSource = track.dataset.machineSource || '';
+        const isEmpty = !machineId && !machineAssembly;
+        if (isEmpty) {
+            return;
+        }
+        if (machineSource === 'editor' && editorEl?.value?.trim()) {
+            sources.push(editorEl.value);
+            return;
+        }
+        if (machineAssembly.trim()) {
+            sources.push(machineAssembly);
+            return;
+        }
+        missing.push(machineId || `track ${index + 1}`);
+    });
+
+    if (missing.length) {
+        return {
+            source: '',
+            error: `Missing assembly for ${missing.join(', ')}.`,
+            isEmpty: false,
+        };
+    }
+    if (!sources.length) {
+        return { source: '', error: 'No machines selected in tracks.', isEmpty: true };
+    }
+    return { source: sources.join('\n\n'), isEmpty: false };
+}
+
 function enableControls() { 
     connectBtn.disabled = true;
     loadProgramBtn.disabled = false;
@@ -409,13 +450,37 @@ loadProgramBtn.addEventListener('click', () => {
         return;
     }
     if (!editorEl) {
-        setStatus('Program editor not available.');
+        const { source, error } = buildProgramSourceFromTracks();
+        if (error) {
+            setStatus(error);
+            return;
+        }
+        const programBuffer = new Uint16Array(512);
+        try {
+            console.log("loading program", source);
+            const descriptor = compile_program(source, programBuffer);
+            deck.load_program(programBuffer, descriptor.length);
+            setStatus(`Loaded program (${descriptor.length} words)`);
+        } catch (err) {
+            console.error('Load program error:', err);
+            setStatus('Load program failed: ' + (err.message || err));
+        }
+        return;
+    }
+    const { source, error, isEmpty } = buildProgramSourceFromTracks();
+    const programSource = source || editorEl.value;
+    if (error && !isEmpty) {
+        setStatus(error);
+        return;
+    }
+    if (error && !programSource.trim()) {
+        setStatus(error);
         return;
     }
     const programBuffer = new Uint16Array(512);
     try {
-        console.log("loading program", editorEl.value);
-        const descriptor = compile_program(editorEl.value, programBuffer);
+        console.log("loading program", programSource);
+        const descriptor = compile_program(programSource, programBuffer);
         deck.load_program(programBuffer, descriptor.length);
         setStatus(`Loaded program (${descriptor.length} words)`);
     } catch (err) {
