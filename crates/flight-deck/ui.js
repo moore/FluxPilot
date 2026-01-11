@@ -160,6 +160,15 @@ colorPickerTpl.innerHTML = `
     <span class="value" part="value"></span>
   </div>
 `;
+
+const statusTpl = document.createElement("template");
+statusTpl.innerHTML = `
+  <link rel="stylesheet" href="index.css">
+  <div class="status-pill">
+    <span class="status-dot"></span>
+    <span class="status-text"><slot></slot></span>
+  </div>
+`;
 class MachineCard extends HTMLElement {
   static get observedAttributes() {
     return ["title", "description", "action-label"];
@@ -377,7 +386,43 @@ if (!customElements.get("fd-color-picker")) {
   customElements.define("fd-color-picker", ColorPicker);
 }
 
-export { ColorPicker };
+class StatusPill extends HTMLElement {
+  static get observedAttributes() {
+    return ["state"];
+  }
+
+  #dotEl;
+  #pillEl;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    root.append(statusTpl.content.cloneNode(true));
+    this.#dotEl = root.querySelector(".status-dot");
+    this.#pillEl = root.querySelector(".status-pill");
+  }
+
+  connectedCallback() {
+    this.syncState();
+  }
+
+  attributeChangedCallback() {
+    this.syncState();
+  }
+
+  syncState() {
+    const state = this.getAttribute("state") ?? "disconnected";
+    const isConnected = state === "connected";
+    this.#pillEl.classList.toggle("is-connected", isConnected);
+    this.#pillEl.classList.toggle("is-disconnected", !isConnected);
+  }
+}
+
+if (!customElements.get("fd-status")) {
+  customElements.define("fd-status", StatusPill);
+}
+
+export { ColorPicker, StatusPill };
 
 export async function runUi() {
   const trackList = document.getElementById("track-list");

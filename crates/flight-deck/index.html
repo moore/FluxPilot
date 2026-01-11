@@ -10,17 +10,14 @@
     <fd-app class="shell">
       <header class="fade-in">
         <div class="brand">
-          <div class="status-pill">
-            <span class="status-dot"></span>
-            Connected to Device 01
-          </div>
-          <h1>Flight Deck</h1>
+          <h1>Flight Deck</h1>          
           <p>
             Track-driven lighting control. Assign machines, tune their parameters,
             and orchestrate LED behavior like a live performance.
           </p>
         </div>
         <div class="actions">
+          <fd-status id="status-pill" state="disconnected"></fd-status>
           <button class="button primary" id="connect">Connect Device</button>
           <button class="button" id="load-program" disabled>Load Program</button>
           <button class="button">Record</button>

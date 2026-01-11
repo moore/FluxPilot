@@ -4,6 +4,7 @@ import AsyncQueue from "/async_queue.js";
 
 const statusEl = document.getElementById('status');
 const connectBtn = document.getElementById('connect');
+const statusPillEl = document.getElementById('status-pill');
 const loadProgramBtn = document.getElementById('load-program');
 const sliderEl = document.getElementById('color-slider');
 const sliderValueEl = document.getElementById('slider-value');
@@ -101,12 +102,36 @@ function setStatus(msg) {
     statusEl.textContent = msg;
 }
 
+function setConnectionState(isConnected) {
+    if (!statusPillEl) {
+        return;
+    }
+    statusPillEl.setAttribute('state', isConnected ? 'connected' : 'disconnected');
+}
+
 function enableControls() { 
     connectBtn.disabled = true;
     loadProgramBtn.disabled = false;
     sliderEl.disabled = false;
     brightnessEl.disabled = false;
     colorBtns.forEach(b => b.disabled = false);
+}
+
+function disableControls() {
+    connectBtn.disabled = false;
+    loadProgramBtn.disabled = true;
+    sliderEl.disabled = true;
+    brightnessEl.disabled = true;
+    colorBtns.forEach(b => b.disabled = true);
+}
+
+function handleDisconnect(message) {
+    writer = null;
+    setConnectionState(false);
+    disableControls();
+    if (message) {
+        setStatus(message);
+    }
 }
 
 function resolvePending(requestId) {
@@ -213,7 +238,11 @@ export async function connect() {
             await port.open({ baudRate: 9600 });
             writer = { port: port.writable.getWriter(), type: 'serial' };
             enableControls();
+            setConnectionState(true);
             setStatus('Connected via Web Serial. Tap a color.');
+            port.addEventListener?.('disconnect', () => {
+                handleDisconnect('Device disconnected.');
+            });
             return;
         } catch (err) {
             console.error('Web Serial Connect error:', err);
@@ -275,9 +304,12 @@ export async function connect() {
         writer = { device, type: 'usb', inEndpoint, outEndpoint };
         startUsbReceiveLoop(device);
         enableControls();
+        setConnectionState(true);
         setStatus('Connected via WebUSB. Tap a color.');
     } catch (err) {
         console.error('Connect error:', err);
+        setConnectionState(false);
+        disableControls();
         setStatus('Connection failed: ' + (err.message || err));
     }
 }
@@ -293,7 +325,7 @@ async function sendMessage(message) {
         setStatus(`Sent ${message.length} bytes`);
     } catch (err) {
         console.error('Write error:', err);
-        setStatus('Send failed: ' + (err.message || err));
+        handleDisconnect('Send failed: ' + (err.message || err));
     }
 }
 
@@ -348,6 +380,7 @@ async function startUsbReceiveLoop(device) {
             }
         } catch (err) {
             console.error('USB read error:', err);
+            handleDisconnect('Device disconnected.');
             break;
         }
     }
@@ -422,4 +455,10 @@ colorCalls.forEach((color, i) => colorBtns[i].addEventListener('click', () => {
 if (!('serial' in navigator) && !('usb' in navigator)) {
     connectBtn.disabled = true;
     setStatus('Neither Web Serial nor WebUSB available.');
+}
+
+if ('usb' in navigator) {
+    navigator.usb.addEventListener('disconnect', () => {
+        handleDisconnect('Device disconnected.');
+    });
 }
