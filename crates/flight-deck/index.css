@@ -194,8 +194,9 @@ main {
 }
 
 .tracks-panel {
-  background: linear-gradient(160deg, rgba(160, 196, 222, 0.92), rgba(190, 222, 240, 0.92)),
-    repeating-linear-gradient(135deg, rgba(214, 235, 246, 0.24) 0px, rgba(214, 235, 246, 0.24) 12px, rgba(168, 198, 224, 0.18) 12px, rgba(168, 198, 224, 0.18) 24px);
+  background: transparent;
+  border: none;
+  padding: 0;
 }
 
 .panel-header {
