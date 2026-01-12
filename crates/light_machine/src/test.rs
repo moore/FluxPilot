@@ -308,6 +308,49 @@ fn op_store() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_load_named_global() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 2 functions 1",
+        ".global red 0",
+        ".global blue 1",
+        ".func main index 0",
+        "LOAD red",
+        "LOAD blue",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [10u16, 20u16];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[10, 20]);
+    Ok(())
+}
+
+#[test]
+fn op_store_named_global() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 2 functions 1",
+        ".global red 0",
+        ".global blue 1",
+        ".func main index 0",
+        "PUSH 55",
+        "STORE red",
+        "PUSH 77",
+        "STORE blue",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 2];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(globals, [55, 77]);
+    assert!(stack.is_empty());
+    Ok(())
+}
+
+#[test]
 fn op_load_static() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",

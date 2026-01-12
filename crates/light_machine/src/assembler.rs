@@ -50,6 +50,8 @@ pub enum AssemblerErrorKind {
     InvalidNumber,
     NameTooLong,
     DuplicateLabel,
+    DuplicateGlobal,
+    GlobalIndexOutOfRange,
     MaxLabelsExceeded,
     UnknownLabel,
     MissingMachine,
@@ -107,11 +109,13 @@ pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MA
     static_labels: Vec<Label, LABEL_CAP>,
     fixups: Vec<Fixup, LABEL_CAP>,
     funcs: Vec<FuncEntry, FUNCTION_COUNT_MAX>,
+    globals: Vec<Label, LABEL_CAP>,
     data: Vec<Word, DATA_CAP>,
     cursor: Word,
     function_base: Word,
     next_function_index: Word,
     function_count: Word,
+    globals_size: Word,
     line_number: u32,
 }
 
@@ -128,11 +132,13 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             static_labels: Vec::new(),
             fixups: Vec::new(),
             funcs: Vec::new(),
+            globals: Vec::new(),
             data: Vec::new(),
             cursor: 0,
             function_base: 0,
             next_function_index: 0,
             function_count: 0,
+            globals_size: 0,
             line_number: 0,
         }
     }
@@ -232,6 +238,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ".machine" => self.start_machine(tokens),
             ".func" => self.start_function(tokens),
             ".func_decl" => self.declare_function(tokens),
+            ".global" => self.declare_global(tokens),
             ".data" => self.start_data(tokens),
             ".end" => self.end_block(),
             _ => Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective)),
@@ -257,10 +264,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         self.labels.clear();
         self.static_labels.clear();
         self.fixups.clear();
+        self.globals.clear();
         self.cursor = 0;
         self.function_count = function_count;
         self.next_function_index = 0;
         self.funcs.clear();
+        self.globals_size = globals_size;
         let program = self
             .program
             .take()
@@ -268,6 +277,33 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         let machine = program.new_machine(function_count, globals_size)?;
         self.machine = Some(machine);
         self.block = BlockKind::Machine;
+        Ok(())
+    }
+
+    fn declare_global(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
+        if !matches!(self.block, BlockKind::Machine) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
+        }
+        if tokens.len() != 3 {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+        }
+        let name = to_name(tokens.get(1).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        if self.globals.iter().any(|entry| entry.name == name) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::DuplicateGlobal));
+        }
+        let index = parse_word(tokens.get(2).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        if index >= self.globals_size {
+            return Err(AssemblerError::Kind(
+                AssemblerErrorKind::GlobalIndexOutOfRange,
+            ));
+        }
+        self.globals
+            .push(Label { name, offset: index })
+            .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
         Ok(())
     }
 
@@ -682,6 +718,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         }
         if let Some(entry) = self.funcs.iter().find(|entry| entry.name == name) {
             return Ok(Some(entry.index));
+        }
+        if let Some(entry) = self.globals.iter().find(|entry| entry.name == name) {
+            return Ok(Some(entry.offset));
         }
 
         if matches!(self.block, BlockKind::Function) {

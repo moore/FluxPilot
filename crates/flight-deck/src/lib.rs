@@ -382,6 +382,8 @@ fn assembler_error_to_js(err: AssemblerError) -> JsValue {
         AssemblerErrorKind::InvalidNumber => "invalid number",
         AssemblerErrorKind::NameTooLong => "name too long",
         AssemblerErrorKind::DuplicateLabel => "duplicate label",
+        AssemblerErrorKind::DuplicateGlobal => "duplicate global",
+        AssemblerErrorKind::GlobalIndexOutOfRange => "global index out of range",
         AssemblerErrorKind::MaxLabelsExceeded => "max labels exceeded",
         AssemblerErrorKind::UnknownLabel => "unknown label",
         AssemblerErrorKind::MissingMachine => "missing machine",
