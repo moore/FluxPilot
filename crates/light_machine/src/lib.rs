@@ -567,6 +567,10 @@ impl<'a, 'b> Program<'a, 'b> {
                     continue;
                 }
                 Ops::Return => {
+                    // Read the return count operand that follows RET.
+                    pc = next_pc(pc)?;
+                    let return_count = read_static(pc, self.static_data)? as usize;
+                    // Compute frame metadata positions relative to the current frame pointer.
                     let fp_index = usize::from(self.frame_pointer);
                     let return_pc_index = fp_index
                         .checked_sub(2)
@@ -574,15 +578,41 @@ impl<'a, 'b> Program<'a, 'b> {
                     let saved_fp_index = fp_index
                         .checked_sub(1)
                         .ok_or(MachineError::StackUnderFlow)?;
+                    // Fetch return PC and the caller's frame pointer from the frame header.
                     let return_pc = *stack
                         .get(return_pc_index)
                         .ok_or(MachineError::StackUnderFlow)?;
                     let saved_frame_pointer = *stack
                         .get(saved_fp_index)
                         .ok_or(MachineError::StackUnderFlow)?;
-                    // Remove return_pc and saved FP from the stack.
-                    let _ = stack.remove(return_pc_index);
-                    let _ = stack.remove(return_pc_index);
+                    // Copy return values from the top of the stack before unwinding the frame.
+                    let original_len = stack.len();
+                    let return_values_start = original_len
+                        .checked_sub(return_count)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    
+                    for offset in 0..return_count {
+                        let src_index = return_values_start
+                            .checked_add(offset)
+                            .ok_or(MachineError::StackUnderFlow)?;
+                        let dest_index = return_pc_index
+                            .checked_add(offset)
+                            .ok_or(MachineError::StackOverflow)?;
+                        let value = *stack
+                            .get(src_index)
+                            .ok_or(MachineError::StackUnderFlow)?;
+                        let slot = stack
+                            .get_mut(dest_index)
+                            .ok_or(MachineError::StackUnderFlow)?;
+                        *slot = value;
+                    }
+
+                    // Drop the call frame header and locals, keeping only the return values.
+                    let new_len = return_pc_index
+                            .checked_add(return_count)
+                            .ok_or(MachineError::StackUnderFlow)?;
+                    stack.truncate(new_len);
+                    // Restore caller frame pointer and jump to saved return PC.
                     self.frame_pointer = saved_frame_pointer;
                     pc = return_pc as usize;
                     continue;

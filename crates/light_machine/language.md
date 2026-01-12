@@ -81,7 +81,7 @@ Stack ops:
 - `POP`                 ; Pop and discard
 - `DUP`                 ; Duplicate top of stack
 - `SWAP`                ; Swap top two values
-- `RET`                 ; Return via saved frame pointer and return PC
+- `RET <count>`         ; Return via saved frame pointer and return PC
 - `SLOAD <offset>`      ; Push stack[frame_pointer + offset] (2 words total)
 - `SSTORE <offset>`     ; Store top at stack[frame_pointer + offset] (2 words total)
 
@@ -129,7 +129,8 @@ Only these are executed today:
 - `LOAD_STATIC`: pop addr, push static_data[addr].
 - `JUMP`: pop addr and jump.
 - `CALL`: pop function index + arg count (stack: ... args, arg_count, func_index), insert return PC and saved frame pointer before args, set frame pointer to first arg, call function, resume after.
-- `RET`: load return PC + saved frame pointer using frame pointer, remove them from stack, restore frame pointer, jump to return PC.
+- `RET <count>`: copy `<count>` values from the top of the stack, remove the call frame,
+  restore the saved frame pointer, push the copied values, and jump to the saved return PC.
 - `BRLT`/`BRLTE`/`BRGT`/`BRGTE`/`BREQ`: pop addr and compare.
 - `ADD`/`SUB`/`MUL`/`DIV`/`MOD`: pop two values, push arithmetic result.
 - `EXIT`: return from function.

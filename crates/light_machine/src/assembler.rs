@@ -671,6 +671,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 | "sload"
                 | "SSTORE"
                 | "sstore"
+                | "RET"
+                | "ret"
         );
 
         let operand = if expects_operand {
@@ -705,7 +707,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ))?),
             "DUP" | "dup" => Op::Dup,
             "SWAP" | "swap" => Op::Swap,
-            "RET" | "ret" => Op::Return,
+            "RET" | "ret" => Op::Return(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
             "LOAD_STATIC" | "load_static" => Op::LoadStatic,
             "JUMP" | "jump" => Op::Jump,
             "CALL" | "call" => Op::Call,

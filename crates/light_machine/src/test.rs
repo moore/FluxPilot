@@ -1009,8 +1009,11 @@ fn op_return() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 2",
         ".func helper index 1",
+        "PUSH 66",
+        "PUSH 77",
+        "PUSH 88",
         "PUSH 99",
-        "RET",
+        "RET 3",
         ".end",
         ".func main index 0",
         "PUSH 0",
@@ -1018,11 +1021,11 @@ fn op_return() -> Result<(), MachineError> {
         "EXIT",
         ".end",
         ".end",
-    ]);
+    ]); 
 
     let mut globals = [0u16; 1];
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
-    assert_eq!(stack.as_slice(), &[99]);
+    assert_eq!(stack.as_slice(), &[77, 88, 99]);
     Ok(())
 }
