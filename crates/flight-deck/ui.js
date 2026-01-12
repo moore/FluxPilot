@@ -37,7 +37,7 @@ export class MachineDescriptor {
 
 
 export const CRAWLER_MACHINE = `
-.machine main globals 3 functions 2
+.machine main globals 3 functions 3
 
     .func set_rgb index 0
       STORE 0
@@ -46,23 +46,28 @@ export const CRAWLER_MACHINE = `
       EXIT
     .end
 
-    .func get_rgb index 1
+    .func get_rgb_worker index 2
       PUSH 1000 ; count up 1 second
       MOD
-      PUSH 40
-      DIV      ; scale to number of leds
+      PUSH 40 ; ticks per LED (1000 / 25 LEDs)
+      DIV
       BREQ matches
       PUSH 0
       PUSH 0
       PUSH 0
-      EXIT
+      RET 3
       matches:
       LOAD 0
       LOAD 1
       LOAD 2
-      EXIT
+      RET 3
     .end
 
+    .func get_rgb index 1
+      PUSH 2
+      CALL get_rgb_worker
+      EXIT
+    .end
 .end
 `;
 
