@@ -252,6 +252,28 @@ fn op_sload() -> Result<(), MachineError> {
 }
 
 #[test]
+fn op_sload_named() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        ".frame first 0",
+        ".frame second 1",
+        "PUSH 10",
+        "PUSH 20",
+        "SLOAD first",
+        "SLOAD second",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[10, 20, 10, 20]);
+    Ok(())
+}
+
+#[test]
 fn op_sstore() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main globals 0 functions 1",
@@ -260,6 +282,28 @@ fn op_sstore() -> Result<(), MachineError> {
         "PUSH 2",
         "PUSH 3",
         "SSTORE 0",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut globals = [0u16; 1];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    run_single(&program, &mut globals, &mut stack)?;
+    assert_eq!(stack.as_slice(), &[3, 2]);
+    Ok(())
+}
+
+#[test]
+fn op_sstore_named() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main globals 0 functions 1",
+        ".func main index 0",
+        ".frame replace 0",
+        ".frame keep 1",
+        "PUSH 1",
+        "PUSH 2",
+        "PUSH 3",
+        "SSTORE replace",
         "EXIT",
         ".end",
         ".end",

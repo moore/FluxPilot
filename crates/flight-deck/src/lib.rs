@@ -383,6 +383,7 @@ fn assembler_error_to_js(err: AssemblerError) -> JsValue {
         AssemblerErrorKind::NameTooLong => "name too long",
         AssemblerErrorKind::DuplicateLabel => "duplicate label",
         AssemblerErrorKind::DuplicateGlobal => "duplicate global",
+        AssemblerErrorKind::DuplicateStackSlot => "duplicate stack slot",
         AssemblerErrorKind::GlobalIndexOutOfRange => "global index out of range",
         AssemblerErrorKind::MaxLabelsExceeded => "max labels exceeded",
         AssemblerErrorKind::UnknownLabel => "unknown label",

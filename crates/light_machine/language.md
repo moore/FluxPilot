@@ -26,6 +26,7 @@ Directives (top-level):
 - `.func_decl <name> [index <I>]`: declares a function without a body.
 - `.data <name>`: starts a static data block (u16 words).
 - `.global <name> <index>`: declares a named global index for LOAD/STORE.
+- `.frame <name> <offset>`: declares a named stack slot for SLOAD/SSTORE.
 - `.end`: ends the current machine, function, or data block.
 
 Notes:
@@ -179,6 +180,7 @@ Whitespace and comments can appear between any tokens.
     directive      = machine_decl | func_decl | func_forward_decl | data_decl | end_decl ;
     machine_decl   = ".machine" ident "globals" number "functions" number ;
     global_decl    = ".global" ident number ;
+    stack_decl     = ".frame" ident number ;
     func_decl      = ".func" ident [ "index" number ] ;
     func_forward_decl = ".func_decl" ident [ "index" number ] ;
     data_decl      = ".data" ident ;
@@ -218,7 +220,8 @@ Whitespace and comments can appear between any tokens.
   `.func_decl`. Multiple bodies for the same name are an error.
 - Labels resolve to word indices within the current block.
 - `operand` label references resolve to the word index of the label in the same
-  function or data block, or to a named global declared with `.global`.
+  function or data block, to a named global declared with `.global`, or to a named
+  stack slot declared with `.frame` (for SLOAD/SSTORE).
 - `.end` closes the most recent open block (function/data first, then machine).
 - Instructions are only valid inside `.func` blocks; `.data` blocks accept only
   `.word` or bare numeric values.

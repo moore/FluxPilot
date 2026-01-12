@@ -86,3 +86,23 @@ fn supports_named_globals() {
     let descriptor = asm.finish().unwrap();
     assert_eq!(descriptor.machines.len(), 1);
 }
+
+#[test]
+fn supports_named_stack_slots() {
+    let mut buffer = [0u16; 128];
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1).unwrap();
+    let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
+
+    asm.add_line(".machine main globals 0 functions 1").unwrap();
+    asm.add_line(".func main index 0").unwrap();
+    asm.add_line(".frame first 0").unwrap();
+    asm.add_line(".frame second 1").unwrap();
+    asm.add_line("SLOAD first").unwrap();
+    asm.add_line("SSTORE second").unwrap();
+    asm.add_line("EXIT").unwrap();
+    asm.add_line(".end").unwrap();
+    asm.add_line(".end").unwrap();
+
+    let descriptor = asm.finish().unwrap();
+    assert_eq!(descriptor.machines.len(), 1);
+}

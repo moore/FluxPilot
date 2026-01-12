@@ -51,6 +51,7 @@ pub enum AssemblerErrorKind {
     NameTooLong,
     DuplicateLabel,
     DuplicateGlobal,
+    DuplicateStackSlot,
     GlobalIndexOutOfRange,
     MaxLabelsExceeded,
     UnknownLabel,
@@ -110,6 +111,7 @@ pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MA
     fixups: Vec<Fixup, LABEL_CAP>,
     funcs: Vec<FuncEntry, FUNCTION_COUNT_MAX>,
     globals: Vec<Label, LABEL_CAP>,
+    stack_slots: Vec<Label, LABEL_CAP>,
     data: Vec<Word, DATA_CAP>,
     cursor: Word,
     function_base: Word,
@@ -133,6 +135,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             fixups: Vec::new(),
             funcs: Vec::new(),
             globals: Vec::new(),
+            stack_slots: Vec::new(),
             data: Vec::new(),
             cursor: 0,
             function_base: 0,
@@ -239,6 +242,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ".func" => self.start_function(tokens),
             ".func_decl" => self.declare_function(tokens),
             ".global" => self.declare_global(tokens),
+            ".frame" => self.declare_stack_slot(tokens),
             ".data" => self.start_data(tokens),
             ".end" => self.end_block(),
             _ => Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective)),
@@ -307,6 +311,28 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Ok(())
     }
 
+    fn declare_stack_slot(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
+        if !matches!(self.block, BlockKind::Function) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
+        }
+        if tokens.len() != 3 {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+        }
+        let name = to_name(tokens.get(1).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        if self.stack_slots.iter().any(|entry| entry.name == name) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::DuplicateStackSlot));
+        }
+        let offset = parse_word(tokens.get(2).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        self.stack_slots
+            .push(Label { name, offset })
+            .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
+        Ok(())
+    }
+
     fn start_function(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
         if !matches!(self.block, BlockKind::Machine) {
             return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
@@ -340,6 +366,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
 
         self.labels.clear();
         self.fixups.clear();
+        self.stack_slots.clear();
         self.cursor = 0;
         let machine = self
             .machine
@@ -650,7 +677,11 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             let token = operand_token.ok_or(AssemblerError::Kind(
                 AssemblerErrorKind::InvalidInstruction,
             ))?;
-            self.resolve_operand(token)?
+            if matches!(mnemonic, "SLOAD" | "sload" | "SSTORE" | "sstore") {
+                self.resolve_stack_operand(token)?
+            } else {
+                self.resolve_operand(token)?
+            }
         } else {
             None
         };
@@ -736,6 +767,17 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         }
 
         Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
+    }
+
+    fn resolve_stack_operand(&mut self, token: &str) -> Result<Option<Word>, AssemblerError> {
+        if let Ok(value) = parse_word(token) {
+            return Ok(Some(value));
+        }
+        let name = to_name(token)?;
+        if let Some(entry) = self.stack_slots.iter().find(|entry| entry.name == name) {
+            return Ok(Some(entry.offset));
+        }
+        self.resolve_operand(token)
     }
 }
 
