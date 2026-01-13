@@ -72,6 +72,9 @@ export const CRAWLER_MACHINE = `
       PUSH 0
       RET 3
       close: ; Compute scale factor 128 / tick_distance
+      PUSH 128 ; invert
+      SWAP
+      SUB
       PUSH 128 ; Compute scale factor [ led_index, ticks, distance, 128]
       SWAP
       DIV
