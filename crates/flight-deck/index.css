@@ -181,6 +181,10 @@ header {
   flex-wrap: wrap;
 }
 
+.header-status {
+  flex-basis: 100%;
+}
+
 .button {
   border: 2px solid rgba(122, 86, 152, 0.55);
   background: rgba(233, 197, 226, 0.85);

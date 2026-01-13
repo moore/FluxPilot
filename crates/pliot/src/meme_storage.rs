@@ -1,15 +1,18 @@
 use crate::{Program, ProgramNumber, Storage, StorageError, Word};
 
 pub struct MemStorage<'a> {
-    program: &'a mut [Word],
-    next_program: usize,
+    programs: [&'a mut [Word]; 2],
+    active_index: usize,
 }
 
 impl<'a> MemStorage<'a> {
     pub fn new(program: &'a mut [Word]) -> Self {
+        // Split the provided buffer into two halves so we can swap on load completion.
+        let mid = program.len() / 2;
+        let (program_a, program_b) = program.split_at_mut(mid);
         Self {
-            program,
-            next_program: 0,
+            programs: [program_a, program_b],
+            active_index: 0,
         }
     }
 }
@@ -20,25 +23,13 @@ impl<'a> Storage for MemStorage<'a> {
     /// `size`` is in instrction count
     fn get_program_loader(&mut self, size: u32) -> Result<Self::L, StorageError> {
         let size: usize = size.try_into().map_err(|_| StorageError::ProgramTooLarge)?;
-
-        // For now lets just hard code that we allway use program 0
-        // in the future we would like to have more then one program
-        // and a way to switch between them but lets do the simple thing now.
-        self.next_program = 0;
-        let Some(available) = self.program.len().checked_sub(self.next_program) else {
-            return Err(StorageError::ProgramTooLarge);
-        };
-        if size > available {
+        let target_index = if self.active_index == 0 { 1 } else { 0 };
+        let target = &self.programs[target_index];
+        if size > target.len() {
             return Err(StorageError::ProgramTooLarge);
         }
 
-        let program_start = self.next_program;
-        let Some(next_program) = self.next_program.checked_add(size) else {
-            return Err(StorageError::ProgramTooLarge);
-        };
-        self.next_program = next_program;
-
-        Ok(MemProgrameLoader::new(program_start, self.next_program))
+        Ok(MemProgrameLoader::new(target_index, size))
     }
 
     fn add_block(
@@ -47,11 +38,14 @@ impl<'a> Storage for MemStorage<'a> {
         block_number: u32,
         block: &[Word],
     ) -> Result<(), StorageError> {
-        loader.add_block(self.program, block_number, block)
+        loader.add_block(self.programs[loader.target_index], block_number, block)
     }
 
     fn finish_load(&mut self, loader: Self::L) -> Result<ProgramNumber, StorageError> {
-        loader.finish_load()
+        let target_index = loader.target_index;
+        loader.finish_load()?;
+        self.active_index = target_index;
+        Ok(ProgramNumber(0))
     }
 
     fn get_program<'b, 'c>(
@@ -63,7 +57,7 @@ impl<'a> Storage for MemStorage<'a> {
             return Err(StorageError::UnknownProgram);
         }
 
-        match Program::new(self.program, globals) {
+        match Program::new(self.programs[self.active_index], globals) {
             Ok(v) => Ok(v),
             Err(e) => Err(StorageError::InvalidProgram(e)),
         }
@@ -71,19 +65,19 @@ impl<'a> Storage for MemStorage<'a> {
 }
 
 pub struct MemProgrameLoader {
-    program_start: usize,
+    target_index: usize,
     program_end: usize,
     next_block: u32,
     next_word: usize,
 }
 
 impl MemProgrameLoader {
-    fn new(program_start: usize, program_end: usize) -> Self {
+    fn new(target_index: usize, program_end: usize) -> Self {
         Self {
-            program_start,
+            target_index,
             program_end,
             next_block: 0,
-            next_word: program_start,
+            next_word: 0,
         }
     }
 
@@ -124,6 +118,6 @@ impl MemProgrameLoader {
     }
 
     fn finish_load(self) -> Result<ProgramNumber, StorageError> {
-        Ok(ProgramNumber(self.program_start))
+        Ok(ProgramNumber(0))
     }
 }

@@ -2,7 +2,7 @@
 import init, { FlightDeck, compile_program } from "/pkg/flight_deck.js";
 import AsyncQueue from "/async_queue.js";
 
-const statusEl = document.getElementById('status');
+const statusEls = Array.from(document.querySelectorAll('[data-status-message]')).filter(Boolean);
 const connectBtn = document.getElementById('connect');
 const statusPillEl = document.getElementById('status-pill');
 const loadProgramBtn = document.getElementById('load-program');
@@ -15,12 +15,14 @@ const colorBtns = ['red','green','blue'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
 const DECK_KEY = "__flightDeck__";
+const HANDLERS_BOUND_KEY = "__flightDeckHandlersBound__";
 let usbReadActive = false;
 let pendingRequestId = null;
 let pendingStartTime = 0;
 let pendingTimer = null;
 let pendingColor = null;
 let currentColor = { r: 0, g: 0, b: 0 };
+let connectInFlight = false;
 
 class DeckReceiveHandler {
     onReturn(requestId, result) {
@@ -99,7 +101,12 @@ export async function consumeQueue() {
 } 
 
 function setStatus(msg) {
-    statusEl.textContent = msg;
+    statusEls.forEach((el) => {
+        if (!el) {
+            return;
+        }
+        el.textContent = msg;
+    });
 }
 
 function setConnectionState(isConnected) {
@@ -325,33 +332,59 @@ export async function connect() {
     }
 }
 
+async function openUsbDevice(device) {
+    if (device.opened) {
+        return;
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            await device.open();
+            return;
+        } catch (err) {
+            if (err?.name === 'InvalidStateError' && attempt < 2) {
+                await new Promise((resolve) => setTimeout(resolve, 120));
+                continue;
+            }
+            throw err;
+        }
+    }
+}
+
 async function connectUsbDevice(device) {
     if (!device) {
         return;
     }
-    await device.open();
-
-    // Try to select the first available configuration
-    if (device.configuration === null) {
-        await device.selectConfiguration(1);
+    if (connectInFlight) {
+        return;
     }
+    connectInFlight = true;
+    try {
+        await openUsbDevice(device);
 
-    const ifaceInfo = findUsbInterface(device);
-    if (!ifaceInfo) {
-        throw new Error('No suitable USB interface with bulk IN/OUT endpoints');
+        // Try to select the first available configuration
+        if (device.configuration === null) {
+            await device.selectConfiguration(1);
+        }
+
+        const ifaceInfo = findUsbInterface(device);
+        if (!ifaceInfo) {
+            throw new Error('No suitable USB interface with bulk IN/OUT endpoints');
+        }
+        const { interfaceNumber, alternateSetting, inEndpoint, outEndpoint } = ifaceInfo;
+
+        await device.claimInterface(interfaceNumber);
+        if (alternateSetting !== 0) {
+            await device.selectAlternateInterface(interfaceNumber, alternateSetting);
+        }
+
+        writer = { device, type: 'usb', inEndpoint, outEndpoint };
+        startUsbReceiveLoop(device);
+        enableControls();
+        setConnectionState(true);
+        setStatus('Connected via WebUSB. Tap a color.');
+    } finally {
+        connectInFlight = false;
     }
-    const { interfaceNumber, alternateSetting, inEndpoint, outEndpoint } = ifaceInfo;
-
-    await device.claimInterface(interfaceNumber);
-    if (alternateSetting !== 0) {
-        await device.selectAlternateInterface(interfaceNumber, alternateSetting);
-    }
-
-    writer = { device, type: 'usb', inEndpoint, outEndpoint };
-    startUsbReceiveLoop(device);
-    enableControls();
-    setConnectionState(true);
-    setStatus('Connected via WebUSB. Tap a color.');
 }
 
 export async function autoConnect() {
@@ -366,6 +399,8 @@ export async function autoConnect() {
         await connectUsbDevice(devices[0]);
     } catch (err) {
         console.error('Auto-connect error:', err);
+    } finally {
+        connectInFlight = false;
     }
 }
 
@@ -442,13 +477,15 @@ async function startUsbReceiveLoop(device) {
     usbReadActive = false;
 }
 
-connectBtn.addEventListener('click', connect);
-loadProgramBtn.addEventListener('click', () => {
-    let deck = globalThis[DECK_KEY];
-    if (!deck) {
-        setStatus('Deck not initialized yet.');
-        return;
-    }
+if (!globalThis[HANDLERS_BOUND_KEY]) {
+    globalThis[HANDLERS_BOUND_KEY] = true;
+    connectBtn?.addEventListener('click', connect);
+    loadProgramBtn?.addEventListener('click', () => {
+        let deck = globalThis[DECK_KEY];
+        if (!deck) {
+            setStatus('Deck not initialized yet.');
+            return;
+        }
     if (!editorEl) {
         const { source, error } = buildProgramSourceFromTracks();
         if (error) {
@@ -459,6 +496,7 @@ loadProgramBtn.addEventListener('click', () => {
         try {
             console.log("loading program", source);
             const descriptor = compile_program(source, programBuffer);
+            console.log("program len", descriptor.length);
             deck.load_program(programBuffer, descriptor.length);
             setStatus(`Loaded program (${descriptor.length} words)`);
         } catch (err) {
@@ -483,64 +521,67 @@ loadProgramBtn.addEventListener('click', () => {
         const descriptor = compile_program(programSource, programBuffer);
         deck.load_program(programBuffer, descriptor.length);
         setStatus(`Loaded program (${descriptor.length} words)`);
-    } catch (err) {
-        console.error('Load program error:', err);
-        setStatus('Load program failed: ' + (err.message || err));
-    }
-});
-
-sliderEl.addEventListener('input', () => {
-    const value = Number(sliderEl.value);
-    sliderValueEl.textContent = `${value}`;
-    const color = sliderToRgb(value);
-    currentColor = color;
-    
-    if (pendingRequestId !== null) {
-        pendingColor = color;
-    } else {
-        sendSliderColor(color);
-    }
-});
-
-brightnessEl.addEventListener('input', () => {
-    const value = Number(brightnessEl.value);
-    const clamped = Math.max(0, Math.min(100, value));
-    brightnessValueEl.textContent = `${clamped}%`;
-    if (pendingRequestId !== null) {
-        pendingColor = currentColor;
-    } else {
-        sendSliderColor(currentColor);
-    }
-});
-
-const colorCalls = [
-    { r: 255, g: 0, b: 0 },
-    { r: 0, g: 255, b: 0 },
-    { r: 0, g: 0, b: 255 },
-];
-
-colorCalls.forEach((color, i) => colorBtns[i].addEventListener('click', () => {
-    let deck = globalThis[DECK_KEY];
-    if (!deck) {
-        setStatus('Deck not initialized yet???');
-        return;
-    }
-    currentColor = color;
-    const scaled = applyBrightness(color);
-    const request_id = deck.call(0, 0, [scaled.r, scaled.g, scaled.b]);
-}));
-
-// Initial check
-if (!('serial' in navigator) && !('usb' in navigator)) {
-    connectBtn.disabled = true;
-    setStatus('Neither Web Serial nor WebUSB available.');
-}
-
-if ('usb' in navigator) {
-    navigator.usb.addEventListener('connect', () => {
-        autoConnect();
+        } catch (err) {
+            console.error('Load program error:', err);
+            setStatus('Load program failed: ' + (err.message || err));
+        }
     });
-    navigator.usb.addEventListener('disconnect', () => {
-        handleDisconnect('Device disconnected.');
+
+    sliderEl?.addEventListener('input', () => {
+        const value = Number(sliderEl.value);
+        sliderValueEl.textContent = `${value}`;
+        const color = sliderToRgb(value);
+        currentColor = color;
+        
+        if (pendingRequestId !== null) {
+            pendingColor = color;
+        } else {
+            sendSliderColor(color);
+        }
     });
+
+    brightnessEl?.addEventListener('input', () => {
+        const value = Number(brightnessEl.value);
+        const clamped = Math.max(0, Math.min(100, value));
+        brightnessValueEl.textContent = `${clamped}%`;
+        if (pendingRequestId !== null) {
+            pendingColor = currentColor;
+        } else {
+            sendSliderColor(currentColor);
+        }
+    });
+
+    const colorCalls = [
+        { r: 255, g: 0, b: 0 },
+        { r: 0, g: 255, b: 0 },
+        { r: 0, g: 0, b: 255 },
+    ];
+
+    colorCalls.forEach((color, i) => colorBtns[i]?.addEventListener('click', () => {
+        let deck = globalThis[DECK_KEY];
+        if (!deck) {
+            setStatus('Deck not initialized yet???');
+            return;
+        }
+        currentColor = color;
+        const scaled = applyBrightness(color);
+        const request_id = deck.call(0, 0, [scaled.r, scaled.g, scaled.b]);
+    }));
+
+    // Initial check
+    if (!('serial' in navigator) && !('usb' in navigator)) {
+        if (connectBtn) {
+            connectBtn.disabled = true;
+        }
+        setStatus('Neither Web Serial nor WebUSB available.');
+    }
+
+    if ('usb' in navigator) {
+        navigator.usb.addEventListener('connect', () => {
+            autoConnect();
+        });
+        navigator.usb.addEventListener('disconnect', () => {
+            handleDisconnect('Device disconnected.');
+        });
+    }
 }

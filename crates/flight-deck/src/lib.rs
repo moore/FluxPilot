@@ -217,6 +217,7 @@ impl FlightDeck {
         let program = &program[..length];
         let loader = self.controler.get_program_loader(program);
         for message in loader {
+            console_log(format!("sending {:?}", message).as_str());
             let message_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
             send(message_buf.as_slice());
         }

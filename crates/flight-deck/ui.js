@@ -38,6 +38,9 @@ export class MachineDescriptor {
 
 export const CRAWLER_MACHINE = `
 .machine main globals 3 functions 3
+    .global red 0
+    .global green 1
+    .global blue 2
 
     .func set_rgb index 0
       STORE 0
@@ -47,19 +50,44 @@ export const CRAWLER_MACHINE = `
     .end
 
     .func get_rgb_worker index 2
-      PUSH 1000 ; count up 1 second
-      MOD
+      .frame led_index 0
+      .frame ticks 1
+      PUSH 1000 
+      MOD ; count up 1 second
+      DUP         
+      SLOAD led_index ; stack is : led_index, ticks, ticks led index
       PUSH 40 ; ticks per LED (1000 / 25 LEDs)
-      DIV
-      BREQ matches
+      MUL          ; Compute adjusted led index
+      DUP          
+      SLOAD ticks ; Max distance [led_index, ticks, ticks, adjusted led, adjusted led, ticks]
+      BRLTE before
+      SWAP ; [led_index, ticks, adjusted led, ticks ]
+      before:
+      SUB [ led_index, ticks, distance ]
+      DUP
+      PUSH 128 ; Max distance [ led_index, ticks, distance, distance, 128 ]
+      BRLTE close
       PUSH 0
       PUSH 0
       PUSH 0
       RET 3
-      matches:
-      LOAD 0
-      LOAD 1
-      LOAD 2
+      close: ; Compute scale factor 128 / tick_distance
+      PUSH 128 ; Compute scale factor [ led_index, ticks, distance, 128]
+      SWAP
+      DIV
+      DUP    ; Scale red
+      LOAD red
+      SWAP
+      DIV
+      SWAP    ; Scale green
+      DUP
+      LOAD green
+      SWAP
+      DIV
+      SWAP    ; Scale blue
+      LOAD blue
+      SWAP
+      DIV
       RET 3
     .end
 
@@ -70,6 +98,60 @@ export const CRAWLER_MACHINE = `
     .end
 .end
 `;
+
+export const SIMPLE_CRAWLER_MACHINE = `
+.machine main globals 4 functions 4
+    .global red 0
+    .global green 1
+    .global blue 2
+    .global speed 3
+
+    .func set_rgb index 0
+      STORE red
+      STORE blue
+      STORE green
+      PUSH 100
+      STORE speed
+      EXIT
+    .end
+
+    .func get_rgb_worker index 2
+      .frame led_index 0
+      .frame ticks 1
+      PUSH 100
+      STORE speed
+      LOAD speed
+      MOD ; count up 1 second
+      LOAD speed
+      push 25
+      DIV
+      DIV
+      BREQ match
+      PUSH 0
+      PUSH 0
+      PUSH 0
+      RET 3
+      match: 
+      LOAD red
+      LOAD green
+      LOAD blue
+      RET 3
+    .end
+
+    .func get_rgb index 1
+      PUSH 2
+      CALL get_rgb_worker
+      EXIT
+    .end
+
+    .func set_speed index 3
+      LOAD speed
+    .end
+
+.end
+`;
+
+
 
 export const ASSEMBLER_PROGRAM = `
 .machine main globals 3 functions 2
@@ -110,8 +192,24 @@ export const ASSEMBLER_PROGRAM = `
 
 
 
-
 export const DEFAULT_MACHINE_RACK = [
+  new MachineDescriptor({
+    id: "SimpleCrawlerMachine",
+    name: "Simple Crawler",
+    assembly: SIMPLE_CRAWLER_MACHINE,
+    controls: [
+       new MachineControlDescriptor({
+        id: "speed",
+        label: "Speed",
+        functionId: 1,
+        type: "range",
+        min: 10,
+        max: 1000,
+        step: 10,
+        defaultValue: 1000,
+      }),
+    ],
+  }),
   new MachineDescriptor({
     id: "FixedColorMachine",
     name: "Fixed Color Machine",
@@ -152,11 +250,7 @@ trackTpl.innerHTML = `
     <div class="track-header">
       <strong class="track-name"></strong>
       <div class="track-actions">
-        <div class="track-controls">
-          <span class="chip track-speed"></span>
-          <span class="chip track-hue"></span>
-          <span class="chip track-gain"></span>
-        </div>
+        <div class="track-controls"></div>
         <button class="track-edit" type="button">Edit</button>
         <button class="track-delete" type="button">Remove</button>
       </div>
@@ -303,19 +397,18 @@ if (!customElements.get("fd-machine-rack")) {
 
 class TrackMachine extends HTMLElement {
   static get observedAttributes() {
-    return ["name", "meta", "speed", "hue", "gain"];
+    return ["name", "meta"];
   }
 
   #nameEl;
   #metaEl;
-  #speedEl;
-  #hueEl;
-  #gainEl;
+  #controlsEl;
   #removeBtn;
   #editBtn;
   #editorWrap;
   #editorField;
   #isExpanded = false;
+  #controls = [];
 
   constructor() {
     super();
@@ -323,9 +416,7 @@ class TrackMachine extends HTMLElement {
     root.append(trackTpl.content.cloneNode(true));
     this.#nameEl = root.querySelector(".track-name");
     this.#metaEl = root.querySelector(".track-meta");
-    this.#speedEl = root.querySelector(".track-speed");
-    this.#hueEl = root.querySelector(".track-hue");
-    this.#gainEl = root.querySelector(".track-gain");
+    this.#controlsEl = root.querySelector(".track-controls");
     this.#removeBtn = root.querySelector(".track-delete");
     this.#editBtn = root.querySelector(".track-edit");
     this.#editorWrap = root.querySelector(".track-editor");
@@ -357,17 +448,40 @@ class TrackMachine extends HTMLElement {
     this.render();
   }
 
+  get controls() {
+    return this.#controls;
+  }
+
+  set controls(next) {
+    this.#controls = Array.isArray(next) ? next : [];
+    this.renderControls();
+  }
+
   render() {
     const name = this.getAttribute("name") ?? "Machine";
     const meta = this.getAttribute("meta") ?? "Machine";
-    const speed = this.getAttribute("speed") ?? "1.0x";
-    const hue = this.getAttribute("hue") ?? "+0";
-    const gain = this.getAttribute("gain") ?? "60%";
     this.#nameEl.textContent = name;
     this.#metaEl.textContent = meta;
-    this.#speedEl.textContent = `Speed ${speed}`;
-    this.#hueEl.textContent = `Hue ${hue}`;
-    this.#gainEl.textContent = `Gain ${gain}`;
+    this.renderControls();
+  }
+
+  renderControls() {
+    if (!this.#controlsEl) {
+      return;
+    }
+    this.#controlsEl.innerHTML = "";
+    this.#controls.forEach((control) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      const showValue =
+        control.type !== "color_picker" &&
+        typeof control.defaultValue === "number";
+      const valueText = showValue
+        ? ` ${control.defaultValue}${control.units ?? ""}`
+        : "";
+      chip.textContent = `${control.label}${valueText}`;
+      this.#controlsEl.appendChild(chip);
+    });
   }
 
   toggleEditor() {
@@ -548,18 +662,17 @@ export async function runUi() {
       desc,
       machineId,
       assembly: machine?.assembly ?? "",
+      controls: machine?.controls ?? [],
       source: machineSource,
     };
   };
 
-  const createTrack = ({ name, meta, machineId, assembly, source }) => {
+  const createTrack = ({ name, meta, machineId, assembly, controls, source }) => {
     const track = document.createElement("fd-track");
     const machine = document.createElement("fd-track-machine");
     machine.setAttribute("name", name);
     machine.setAttribute("meta", `${meta} · from rack`);
-    machine.setAttribute("speed", "1.0x");
-    machine.setAttribute("hue", "+0");
-    machine.setAttribute("gain", "60%");
+    machine.controls = controls;
     if (machineId) {
       track.dataset.machineId = machineId;
     }
@@ -594,9 +707,7 @@ export async function runUi() {
     if (trackMachine) {
       trackMachine.setAttribute("name", defaultMachine.name);
       trackMachine.setAttribute("meta", "Rack Default · preloaded");
-      trackMachine.setAttribute("speed", "1.0x");
-      trackMachine.setAttribute("hue", "+0");
-      trackMachine.setAttribute("gain", "60%");
+      trackMachine.controls = defaultMachine.controls ?? [];
     }
     firstTrack.dataset.machineId = defaultMachine.id;
     firstTrack.dataset.machineAssembly = defaultMachine.assembly || "";

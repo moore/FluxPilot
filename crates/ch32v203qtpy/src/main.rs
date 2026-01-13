@@ -71,19 +71,20 @@ const INCOMING_MESSAGE_CAP: usize = 128;
 const OUTGOING_MESSAGE_CAP: usize = 128;
 const NUM_LEDS: usize = 25;
 const FRAME_TARGET: u64 = 16;
-
+const PROGRAM_BUFFER_SIZE: usize = 1024;
+const USB_RECEIVE_BUF_SIZE: usize = 265; // BUG: I don't know the correct size
 #[cfg(all(feature = "storage-mem", feature = "storage-flash"))]
 compile_error!("Enable only one of `storage-mem` or `storage-flash` features.");
 #[cfg(not(any(feature = "storage-mem", feature = "storage-flash")))]
 compile_error!("Enable exactly one of `storage-mem` or `storage-flash` features.");
 
-static PROGRAM_BUFFER: StaticCell<[u16; 100]> = StaticCell::new();
+static PROGRAM_BUFFER: StaticCell<[u16; PROGRAM_BUFFER_SIZE]> = StaticCell::new();
 static GLOBALS: StaticCell<[u16; 10]> = StaticCell::new();
 #[cfg(feature = "storage-mem")]
 static MEM_STORAGE: StaticCell<MemStorage<'static>> = StaticCell::new();
 #[cfg(feature = "storage-flash")]
 static FLASH_STORAGE: StaticCell<FlashStorage> = StaticCell::new();
-static USB_RECEIVE_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+static USB_RECEIVE_BUF: StaticCell<[u8; USB_RECEIVE_BUF_SIZE]> = StaticCell::new();
 static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell::new();
 static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
 static USB_BOS_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
@@ -207,7 +208,7 @@ async fn main(spawner: Spawner) -> () {
     let globals = GLOBALS.init([0u16; 10]);
     #[cfg(feature = "storage-mem")]
     let storage = {
-        let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
+        let program_buffer = PROGRAM_BUFFER.init([0u16; PROGRAM_BUFFER_SIZE]);
         if get_program(program_buffer).is_err() {
             // BUG: we should log here.
             return;
@@ -385,7 +386,7 @@ async fn io_loop<'d, T: Instance + 'd>(
     sender: &mut VendorSender<'d, Driver<'d, T>>,
     shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
 ) -> Result<(), Disconnected> {
-    let buf = USB_RECEIVE_BUF.init([0u8; 64]);
+    let buf = USB_RECEIVE_BUF.init([0u8; USB_RECEIVE_BUF_SIZE]);
     let frame = RAW_MESSAGE_BUFF.init(Vec::new());
     loop {
         let n = receiver.read_packet(buf).await?;

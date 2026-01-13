@@ -20,6 +20,7 @@
           <fd-status id="status-pill" state="disconnected"></fd-status>
           <button class="button primary" id="connect">Connect Device</button>
           <button class="button" id="load-program" disabled>Load Program</button>
+          <div class="status-message header-status" data-status-message role="status"></div>
         </div>
       </header>
 
@@ -63,7 +64,7 @@
               </div>
               <input id="brightness-slider" type="range" min="0" max="100" value="10" disabled />
             </div>
-            <div id="status" class="status-message" role="alert"></div>
+            <div class="status-message" data-status-message role="alert"></div>
           </div>
         </section>
 
@@ -73,6 +74,11 @@
             <h2>Machine Rack</h2>
             <button class="button rack-close" id="close-rack" type="button">Done</button>
           </div>
+           <fd-machine-card
+            title="Simple Crawl"
+            description="Color crawls across the LEDs."
+            data-machine-id="SimpleCrawlerMachine"
+          ></fd-machine-card>
           <fd-machine-card
             title="Pulse"
             description="All LEDs display the same color with a slow pulse"
