@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+use console_error_panic_hook;
 use pliot::protocol::{Controler, ErrorType, FunctionId, MessageType, Protocol};
 
 use light_machine::{
@@ -13,7 +14,7 @@ use postcard::{to_vec_cobs, from_bytes_cobs};
 use heapless::Vec;
 use std::vec::Vec as StdVec;
 
-const MAX_ARGS: usize = 3;
+const MAX_ARGS: usize = 10;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
 const ASM_MACHINE_MAX: usize = 8;
@@ -28,6 +29,7 @@ pub enum FlightDeckError {
     ToManyArguments,
     CouldNotReceive,
     InvalidProgramLength,
+    CouldNotEncode,
 }
 
 
@@ -136,6 +138,7 @@ impl Default for FlightDeck {
 impl FlightDeck {
     #[wasm_bindgen(constructor)]
     pub fn new() -> FlightDeck {
+        console_error_panic_hook::set_once();
         FlightDeck {
             controler: Controler::new(),
         }
@@ -161,9 +164,10 @@ impl FlightDeck {
 
         let message = self.controler.call(function, call_args);
 
-        let message_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
+        let message_buf = to_vec_cobs::<ProtocolType, 512>(&message)
+            .map_err(|_| FlightDeckError::CouldNotEncode)?;
         let bytes = message_buf.as_slice();
-        send(bytes);
+                send(bytes);
 
         let request_id = message.get_request_id().map(|id| id.value());
 
@@ -218,7 +222,8 @@ impl FlightDeck {
         let loader = self.controler.get_program_loader(program);
         for message in loader {
             console_log(format!("sending {:?}", message).as_str());
-            let message_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
+            let message_buf = to_vec_cobs::<ProtocolType, 512>(&message)
+                .map_err(|_| FlightDeckError::CouldNotEncode)?;
             send(message_buf.as_slice());
         }
 

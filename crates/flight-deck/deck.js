@@ -46,9 +46,19 @@ export async function initDeck() {
     globalThis[DECK_KEY] ??= new FlightDeck();
     if (editorEl && !editorEl.value.trim()) {
         editorEl.value = `
-.machine main globals 3 functions 2
+.machine main globals 3 functions 3
 
-.func set_rgb index 0
+.func init index 0
+    push 8
+    push 16
+    push 32
+    STORE 0
+    STORE 1
+    STORE 2
+    EXIT
+.end
+
+.func set_rgb index 2
     STORE 0
     STORE 1
     STORE 2
@@ -99,6 +109,32 @@ export async function consumeQueue() {
         await sendMessage(message);
     }
 } 
+
+export function callMachineFunction(machineIndex, functionIndex, args) {
+
+    let deck = globalThis[DECK_KEY];
+    if (!deck) {
+        setStatus('Deck not initialized yet.');
+        return null;
+    }
+    if (pendingRequestId !== null) {
+        setStatus('Waiting for previous request...');
+        return null;
+    }
+    try {
+        console.log("calling function ", machineIndex, functionIndex, args);
+        pendingStartTime = performance.now();
+        const requestId = deck.call(machineIndex, functionIndex, args);
+        if (requestId !== undefined && requestId !== null) {
+            pendingRequestId = requestId;
+            setPendingTimeout();
+        }
+        return requestId;
+    } catch (err) {
+        setStatus('Call failed: ' + (err.message || err));
+        return null;
+    }
+}
 
 function setStatus(msg) {
     statusEls.forEach((el) => {
@@ -256,19 +292,12 @@ function applyBrightness(color) {
 }
 
 function sendSliderColor(color) {
-    let deck = globalThis[DECK_KEY];
-    if (!deck) {
-        setStatus('Deck not initialized yet.');
+    if (pendingRequestId !== null) {
+        pendingColor = color;
         return;
     }
     const scaled = applyBrightness(color);
-    pendingStartTime = performance.now();
-    const requestId = deck.call(0, 0, [scaled.r, scaled.g, scaled.b]);
-    if (requestId === undefined || requestId === null) {
-        return;
-    }
-    pendingRequestId = requestId;
-    setPendingTimeout();
+    callMachineFunction(0, 2, [scaled.r, scaled.g, scaled.b]);
 }
 
 function scheduleSend(color) {
@@ -558,14 +587,9 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
     ];
 
     colorCalls.forEach((color, i) => colorBtns[i]?.addEventListener('click', () => {
-        let deck = globalThis[DECK_KEY];
-        if (!deck) {
-            setStatus('Deck not initialized yet???');
-            return;
-        }
         currentColor = color;
         const scaled = applyBrightness(color);
-        const request_id = deck.call(0, 0, [scaled.r, scaled.g, scaled.b]);
+        callMachineFunction(0, 2, [scaled.r, scaled.g, scaled.b]);
     }));
 
     // Initial check

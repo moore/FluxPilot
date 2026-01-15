@@ -114,6 +114,17 @@ impl<
         }
     }
 
+    pub fn init<const STACK_SIZE: usize>(&mut self, stack: &mut Vec<Word, STACK_SIZE>) -> Result<(), PliotError> {
+        let function = FunctionId {
+            machine_index: 0, // BUG: We should iterite over each machine
+            function_index: 0,
+        };
+        let args = Vec::new();
+        let _ = self.call(stack, function, &args)?;
+        Ok(())
+    }
+
+
     pub fn process_message<const STACK_SIZE: usize>(
         &mut self,
         stack: &mut Vec<Word, STACK_SIZE>,
@@ -240,6 +251,7 @@ impl<
                             Self::write_unexpected_message_type(Some(request_id), MessageType::FinishProgram, out_buff)?
                         } else {
                             self.storage.finish_load(current.loader)?;
+                            self.init(stack)?;
                             0
                         }
                     }

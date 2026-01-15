@@ -14,6 +14,7 @@ postcard = { workspace = true }
 serde = { workspace = true }
 light_machine = {path = "../light_machine"}
 pliot = {path = "../pliot"}
+console_error_panic_hook = "0.1"
 
 [package.metadata.wasm-pack.profile.release]
 # it would be better to figure out how

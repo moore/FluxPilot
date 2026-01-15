@@ -1,4 +1,4 @@
-import { consumeQueue, initDeck, autoConnect } from "/deck.js";
+import { consumeQueue, initDeck, autoConnect, callMachineFunction } from "/deck.js";
 
 export class MachineControlDescriptor {
   constructor({
@@ -35,21 +35,104 @@ export class MachineDescriptor {
   }
 }
 
+function hexToRgb(hex) {
+  if (!hex) {
+    return null;
+  }
+  const normalized = hex.startsWith("#") ? hex.slice(1) : hex;
+  if (normalized.length !== 6) {
+    return null;
+  }
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+    return null;
+  }
+  return {
+    r: Math.max(0, Math.min(255, r)),
+    g: Math.max(0, Math.min(255, g)),
+    b: Math.max(0, Math.min(255, b)),
+  };
+}
+
+function findTrackHost(element) {
+  let node = element;
+  while (node) {
+    const direct = node.closest?.("fd-track");
+    if (direct) {
+      return direct;
+    }
+    const root = node.getRootNode?.();
+    node = root?.host ?? null;
+  }
+  return null;
+}
+
+function getTrackIndexForElement(element) {
+  const track = findTrackHost(element);
+  if (!track) {
+    return null;
+  }
+  const trackList = document.getElementById("track-list");
+  if (!trackList) {
+    return null;
+  }
+  const tracks = Array.from(trackList.querySelectorAll("fd-track")).filter(
+    (item) => {
+      const machineId = item.dataset.machineId || "";
+      const machineAssembly = item.dataset.machineAssembly || "";
+      return Boolean(machineId || machineAssembly);
+    }
+  );
+  const index = tracks.indexOf(track);
+  return index >= 0 ? index : null;
+}
+
+function sendControlCall(element, control, args) {
+  const machineIndex = getTrackIndexForElement(element);
+  if (machineIndex == null) {
+    return;
+  }
+  const functionId = Number(control.functionId);
+  if (!Number.isFinite(functionId)) {
+    return;
+  }
+  const payload = Array.isArray(args) ? args : [args];
+  const sanitized = payload.map((value) => {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) {
+      return 0;
+    }
+    return Math.max(0, Math.round(numberValue));
+  });
+  callMachineFunction(machineIndex, functionId, sanitized);
+}
 
 export const CRAWLER_MACHINE = `
-.machine main globals 3 functions 3
+.machine main globals 3 functions 4
     .global red 0
     .global green 1
     .global blue 2
 
-    .func set_rgb index 0
+    .func init index 0
+      PUSH 0
+      STORE red
+      PUSH 16
+      STORE green
+      PUSH 32
+      STORE blue
+      EXIT
+    .end
+
+    .func set_rgb index 2
       STORE 0
       STORE 1
       STORE 2
       EXIT
     .end
 
-    .func get_rgb_worker index 2
+    .func get_rgb_worker index 3
       .frame led_index 0
       .frame ticks 1
       PUSH 1000 
@@ -103,26 +186,39 @@ export const CRAWLER_MACHINE = `
 `;
 
 export const SIMPLE_CRAWLER_MACHINE = `
-.machine main globals 4 functions 4
+.machine main globals 4 functions 5
     .global red 0
     .global green 1
     .global blue 2
     .global speed 3
 
-    .func set_rgb index 0
+    .func init index 0
+      PUSH 0
       STORE red
-      STORE blue
+      PUSH 16
       STORE green
+      PUSH 32
+      STORE blue
       PUSH 100
       STORE speed
       EXIT
     .end
 
-    .func get_rgb_worker index 2
+    .func set_rgb index 2
+      STORE red
+      STORE blue
+      STORE green
+      EXIT
+    .end
+
+    .func set_speed index 3
+      STORE speed
+      EXIT
+    .end
+
+    .func get_rgb_worker index 4
       .frame led_index 0
       .frame ticks 1
-      PUSH 100
-      STORE speed
       LOAD speed
       MOD ; count up 1 second
       LOAD speed
@@ -147,19 +243,30 @@ export const SIMPLE_CRAWLER_MACHINE = `
       EXIT
     .end
 
-    .func set_speed index 3
-      LOAD speed
-    .end
+
 
 .end
 `;
 
 
 
-export const ASSEMBLER_PROGRAM = `
-.machine main globals 3 functions 2
+export const PULSE_MACHINE = `
+.machine main globals 3 functions 3
+    .global red 0
+    .global green 1
+    .global blue 2
 
-    .func set_rgb index 0
+    .func init index 0
+      PUSH 0
+      STORE red
+      PUSH 16
+      STORE green
+      PUSH 32
+      STORE blue
+      EXIT
+    .end
+
+    .func set_rgb index 2
       STORE 0
       STORE 1
       STORE 2
@@ -204,7 +311,7 @@ export const DEFAULT_MACHINE_RACK = [
        new MachineControlDescriptor({
         id: "speed",
         label: "Speed",
-        functionId: 1,
+        functionId: 3,
         type: "range",
         min: 10,
         max: 1000,
@@ -216,17 +323,14 @@ export const DEFAULT_MACHINE_RACK = [
   new MachineDescriptor({
     id: "FixedColorMachine",
     name: "Fixed Color Machine",
-    assembly: ASSEMBLER_PROGRAM,
+    assembly: PULSE_MACHINE,
     controls: [
       new MachineControlDescriptor({
         id: "rainbow",
         label: "Pick Color",
-        functionId: 1,
+        functionId: 2,
         type: "color_picker",
-        min: 0,
-        max: 1024,
-        step: 1,
-        defaultValue: 120,
+        defaultValue: "#468bc0ff",
       }),
     ],
   }),
@@ -305,6 +409,103 @@ colorPickerTpl.innerHTML = `
   <div class="row">
     <input part="input" type="color" />
     <span class="value" part="value"></span>
+  </div>
+`;
+
+const rangeControlTpl = document.createElement("template");
+rangeControlTpl.innerHTML = `
+  <style>
+    :host {
+      display: inline-flex;
+      font-family: var(--font-display, "Trebuchet MS", "Gill Sans", "Verdana", sans-serif);
+      color: #3b1f4c;
+    }
+    .range-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 2px solid rgba(126, 96, 158, 0.42);
+      background: rgba(214, 238, 228, 0.9);
+      color: #2b2137;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      cursor: ew-resize;
+    }
+    .range-pill:focus-visible {
+      outline: 2px solid rgba(92, 64, 124, 0.7);
+      outline-offset: 2px;
+    }
+    .value {
+      font-family: "Courier New", monospace;
+      font-size: 11px;
+      color: #4a2b63;
+    }
+    .scrub-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(24, 16, 34, 0.28);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+    }
+    .scrub-overlay[hidden] {
+      display: none;
+    }
+    .scrub-card {
+      min-width: min(320px, 80vw);
+      padding: 16px;
+      border-radius: 16px;
+      border: 2px solid rgba(106, 78, 136, 0.6);
+      background: rgba(244, 230, 252, 0.96);
+      box-shadow: 0 20px 40px rgba(42, 26, 58, 0.22);
+      display: grid;
+      gap: 8px;
+      text-align: center;
+    }
+    .scrub-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: rgba(58, 30, 75, 0.7);
+    }
+    .scrub-track {
+      position: relative;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(120, 90, 150, 0.2);
+      overflow: hidden;
+    }
+    .scrub-fill {
+      height: 100%;
+      background: linear-gradient(90deg, rgba(122, 90, 158, 0.7), rgba(160, 120, 196, 0.9));
+      width: 0%;
+    }
+    .scrub-value {
+      font-family: "Courier New", monospace;
+      font-size: 16px;
+      color: #2b2137;
+    }
+    .scrub-hint {
+      font-size: 11px;
+      color: rgba(58, 30, 75, 0.6);
+    }
+  </style>
+  <button class="range-pill" type="button" role="slider">
+    <span class="label"></span>
+    <span class="value"></span>
+  </button>
+  <div class="scrub-overlay" hidden>
+    <div class="scrub-card">
+      <div class="scrub-title"></div>
+      <div class="scrub-track">
+        <div class="scrub-fill"></div>
+      </div>
+      <div class="scrub-value"></div>
+      <div class="scrub-hint">Drag left to lower, right to raise</div>
+    </div>
   </div>
 `;
 
@@ -474,6 +675,55 @@ class TrackMachine extends HTMLElement {
     }
     this.#controlsEl.innerHTML = "";
     this.#controls.forEach((control) => {
+      if (control.type === "range") {
+        const rangeControl = document.createElement("fd-range-control");
+        rangeControl.setAttribute("label", control.label ?? "");
+        rangeControl.setAttribute("control-id", control.id ?? "");
+        rangeControl.setAttribute("min", String(control.min ?? 0));
+        rangeControl.setAttribute("max", String(control.max ?? 100));
+        rangeControl.setAttribute("step", String(control.step ?? 1));
+        rangeControl.setAttribute(
+          "value",
+          String(control.defaultValue ?? control.min ?? 0)
+        );
+        if (control.units) {
+          rangeControl.setAttribute("units", String(control.units));
+        }
+        rangeControl.addEventListener("input", (event) => {
+          const value =
+            event?.detail?.value ??
+            Number(rangeControl.getAttribute("value") ?? 0);
+          sendControlCall(rangeControl, control, value);
+        });
+        rangeControl.addEventListener("change", (event) => {
+          const value =
+            event?.detail?.value ??
+            Number(rangeControl.getAttribute("value") ?? 0);
+          sendControlCall(rangeControl, control, value);
+        });
+        this.#controlsEl.appendChild(rangeControl);
+        return;
+      }
+      if (control.type === "color_picker") {
+        const colorPicker = document.createElement("fd-color-picker");
+        colorPicker.setAttribute("label", control.label ?? "");
+        colorPicker.setAttribute("control-id", control.id ?? "");
+        if (typeof control.defaultValue === "string") {
+          colorPicker.setAttribute("value", control.defaultValue);
+        }
+        const handleColorEvent = (event) => {
+          const value = event?.detail?.value ?? colorPicker.value;
+          const rgb = hexToRgb(value);
+          if (!rgb) {
+            return;
+          }
+          sendControlCall(colorPicker, control, [rgb.r, rgb.g, rgb.b]);
+        };
+        colorPicker.addEventListener("input", handleColorEvent);
+        colorPicker.addEventListener("change", handleColorEvent);
+        this.#controlsEl.appendChild(colorPicker);
+        return;
+      }
       const chip = document.createElement("span");
       chip.className = "chip";
       const showValue =
@@ -592,6 +842,293 @@ class ColorPicker extends HTMLElement {
 
 if (!customElements.get("fd-color-picker")) {
   customElements.define("fd-color-picker", ColorPicker);
+}
+
+class RangeControl extends HTMLElement {
+  static get observedAttributes() {
+    return ["value", "label", "min", "max", "step", "units"];
+  }
+
+  #buttonEl;
+  #labelEl;
+  #valueEl;
+  #overlayEl;
+  #overlayCardEl;
+  #overlayTitleEl;
+  #overlayValueEl;
+  #fillEl;
+  #startX = 0;
+  #startValue = 0;
+  #activePointerId = null;
+  #pixelsPerStep = 6;
+
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    root.append(rangeControlTpl.content.cloneNode(true));
+    this.#buttonEl = root.querySelector(".range-pill");
+    this.#labelEl = root.querySelector(".label");
+    this.#valueEl = root.querySelector(".value");
+    this.#overlayEl = root.querySelector(".scrub-overlay");
+    this.#overlayCardEl = root.querySelector(".scrub-card");
+    this.#overlayTitleEl = root.querySelector(".scrub-title");
+    this.#overlayValueEl = root.querySelector(".scrub-value");
+    this.#fillEl = root.querySelector(".scrub-fill");
+  }
+
+  connectedCallback() {
+    if (!this.hasAttribute("value")) {
+      this.value = String(this.min);
+    }
+    if (this.#overlayEl) {
+      this.#overlayEl.hidden = true;
+    }
+    this.#buttonEl.addEventListener("pointerdown", this.handlePointerDown);
+    this.#buttonEl.addEventListener("keydown", this.handleKeyDown);
+    this.syncFromAttributes();
+  }
+
+  disconnectedCallback() {
+    this.#buttonEl.removeEventListener("pointerdown", this.handlePointerDown);
+    this.#buttonEl.removeEventListener("keydown", this.handleKeyDown);
+    this.teardownPointerTracking();
+  }
+
+  attributeChangedCallback() {
+    this.syncFromAttributes();
+  }
+
+  get value() {
+    return this.getAttribute("value");
+  }
+
+  set value(next) {
+    this.setAttribute("value", next);
+  }
+
+  get label() {
+    return this.getAttribute("label");
+  }
+
+  set label(next) {
+    this.setAttribute("label", next);
+  }
+
+  get units() {
+    return this.getAttribute("units");
+  }
+
+  set units(next) {
+    if (next == null) {
+      this.removeAttribute("units");
+      return;
+    }
+    this.setAttribute("units", next);
+  }
+
+  get min() {
+    return this.parseNumberAttr("min", 0);
+  }
+
+  get max() {
+    return this.parseNumberAttr("max", 100);
+  }
+
+  get step() {
+    const raw = this.parseNumberAttr("step", 1);
+    return raw > 0 ? raw : 1;
+  }
+
+  parseNumberAttr(name, fallback) {
+    const raw = this.getAttribute(name);
+    if (raw === null || raw === "") {
+      return fallback;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  formatValue(value) {
+    const units = this.units ?? "";
+    return `${value}${units}`;
+  }
+
+  clampValue(value) {
+    const min = this.min;
+    const max = this.max;
+    return Math.max(min, Math.min(max, value));
+  }
+
+  normalizeValue(value) {
+    const step = this.step;
+    const min = this.min;
+    const snapped = Math.round((value - min) / step) * step + min;
+    return this.clampValue(snapped);
+  }
+
+  syncFromAttributes() {
+    const label = this.label || "Control";
+    const value = this.normalizeValue(this.parseNumberAttr("value", this.min));
+    const min = this.min;
+    const max = this.max;
+    if (this.#labelEl.textContent !== label) {
+      this.#labelEl.textContent = label;
+    }
+    const formatted = this.formatValue(value);
+    this.#valueEl.textContent = formatted;
+    this.#overlayTitleEl.textContent = label;
+    this.#overlayValueEl.textContent = formatted;
+    const percent = max > min ? ((value - min) / (max - min)) * 100 : 0;
+    this.#fillEl.style.width = `${percent}%`;
+    this.#buttonEl.setAttribute("aria-valuemin", String(min));
+    this.#buttonEl.setAttribute("aria-valuemax", String(max));
+    this.#buttonEl.setAttribute("aria-valuenow", String(value));
+    this.#buttonEl.setAttribute("aria-valuetext", formatted);
+  }
+
+  updateValue(next, { emit = true } = {}) {
+    const normalized = this.normalizeValue(next);
+    if (String(normalized) !== this.value) {
+      this.value = String(normalized);
+      if (emit) {
+        this.dispatchEvent(
+          new CustomEvent("input", {
+            detail: { value: normalized },
+            bubbles: true,
+            composed: true,
+          })
+        );
+      }
+    }
+    this.syncFromAttributes();
+  }
+
+  handlePointerDown = (event) => {
+    if (event.button !== undefined && event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    this.#activePointerId = event.pointerId;
+    this.#startX = event.clientX;
+    this.#startValue = this.normalizeValue(
+      this.parseNumberAttr("value", this.min)
+    );
+    this.#pixelsPerStep = this.computePixelsPerStep();
+    this.#overlayEl.hidden = false;
+    this.updateOverlayWidth();
+    this.#buttonEl.setPointerCapture?.(event.pointerId);
+    window.addEventListener("pointermove", this.handlePointerMove);
+    window.addEventListener("pointerup", this.handlePointerUp);
+    window.addEventListener("pointercancel", this.handlePointerUp);
+  };
+
+  handlePointerMove = (event) => {
+    if (this.#activePointerId !== event.pointerId) {
+      return;
+    }
+    const deltaX = event.clientX - this.#startX;
+    const stepsDelta = Math.round(deltaX / this.#pixelsPerStep);
+    const next = this.#startValue + stepsDelta * this.step;
+    this.updateValue(next);
+  };
+
+  handlePointerUp = (event) => {
+    if (this.#activePointerId !== event.pointerId) {
+      return;
+    }
+    this.dispatchEvent(
+      new CustomEvent("change", {
+        detail: { value: this.parseNumberAttr("value", this.min) },
+        bubbles: true,
+        composed: true,
+      })
+    );
+    this.teardownPointerTracking();
+  };
+
+  handleKeyDown = (event) => {
+    const key = event.key;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(key)) {
+      return;
+    }
+    event.preventDefault();
+    const current = this.parseNumberAttr("value", this.min);
+    let next = current;
+    if (key === "ArrowLeft") {
+      next = current - this.step;
+    } else if (key === "ArrowRight") {
+      next = current + this.step;
+    } else if (key === "Home") {
+      next = this.min;
+    } else if (key === "End") {
+      next = this.max;
+    }
+    this.updateValue(next);
+    this.dispatchEvent(
+      new CustomEvent("change", {
+        detail: { value: this.parseNumberAttr("value", this.min) },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  };
+
+  teardownPointerTracking() {
+    if (this.#overlayEl) {
+      this.#overlayEl.hidden = true;
+    }
+    if (this.#activePointerId !== null) {
+      try {
+        this.#buttonEl.releasePointerCapture?.(this.#activePointerId);
+      } catch (err) {
+        // Ignore if capture already released.
+      }
+    }
+    this.#activePointerId = null;
+    window.removeEventListener("pointermove", this.handlePointerMove);
+    window.removeEventListener("pointerup", this.handlePointerUp);
+    window.removeEventListener("pointercancel", this.handlePointerUp);
+  }
+
+  computePixelsPerStep() {
+    const range = Math.max(0, this.max - this.min);
+    const steps = Math.max(1, range / this.step);
+    return Math.max(3, 240 / steps);
+  }
+
+  updateOverlayWidth() {
+    if (!this.#overlayCardEl) {
+      return;
+    }
+    const track = this.findTrackHost();
+    if (!track) {
+      this.#overlayCardEl.style.width = "";
+      return;
+    }
+    const rect = track.getBoundingClientRect();
+    if (!rect?.width) {
+      this.#overlayCardEl.style.width = "";
+      return;
+    }
+    this.#overlayCardEl.style.width = `${Math.round(rect.width * 0.8)}px`;
+  }
+
+  findTrackHost() {
+    let node = this;
+    while (node) {
+      const direct = node.closest?.("fd-track");
+      if (direct) {
+        return direct;
+      }
+      const root = node.getRootNode?.();
+      node = root?.host ?? null;
+    }
+    return null;
+  }
+}
+
+if (!customElements.get("fd-range-control")) {
+  customElements.define("fd-range-control", RangeControl);
 }
 
 class StatusPill extends HTMLElement {

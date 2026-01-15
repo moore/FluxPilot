@@ -269,6 +269,16 @@ async fn main(spawner: Spawner) -> () {
         pliot: Pliot::new(storage, globals.as_mut_slice()),
         stack: Vec::new(),
     }));
+    {
+        let mut guard = shared.lock().await;
+        let PliotShared { pliot, stack } = &mut *guard;
+        if pliot.init(stack).is_err() {
+            debug_mark((32,0,0).into());
+            // BUG: add Logging
+            return;
+        }
+    }
+    
     let (usb_sender, usb_receiver) = class.split();
 
     ////////////////////////////////////////////
@@ -344,15 +354,18 @@ async fn led_task(
 #[inline(never)]
 fn get_program(buffer: &mut [u16]) -> Result<usize, MachineBuilderError> {
     const MACHINE_COUNT: usize = 1;
-    const FUNCTION_COUNT: usize = 2;
+    const FUNCTION_COUNT: usize = 3;
     let program_builder =
         ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(buffer, MACHINE_COUNT as u16)?;
 
     let globals_size = 3;
     let machine = program_builder.new_machine(FUNCTION_COUNT as u16, globals_size)?;
     let mut function = machine.new_function()?;
+    function.add_op(Op::Push(0))?;
     function.add_op(Op::Store(0))?;
+    function.add_op(Op::Push(16))?;
     function.add_op(Op::Store(1))?;
+    function.add_op(Op::Push(8))?;
     function.add_op(Op::Store(2))?;
     function.add_op(Op::Exit)?;
     let (_function_index, machine) = function.finish()?;
@@ -361,6 +374,13 @@ fn get_program(buffer: &mut [u16]) -> Result<usize, MachineBuilderError> {
     function.add_op(Op::Load(0))?;
     function.add_op(Op::Load(1))?;
     function.add_op(Op::Load(2))?;
+    function.add_op(Op::Exit)?;
+    let (_function_index, machine) = function.finish()?;
+
+     let mut function = machine.new_function()?;
+    function.add_op(Op::Store(0))?;
+    function.add_op(Op::Store(1))?;
+    function.add_op(Op::Store(2))?;
     function.add_op(Op::Exit)?;
     let (_function_index, machine) = function.finish()?;
 
