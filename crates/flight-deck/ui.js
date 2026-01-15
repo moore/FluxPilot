@@ -110,10 +110,11 @@ function sendControlCall(element, control, args) {
 }
 
 export const CRAWLER_MACHINE = `
-.machine main globals 3 functions 4
+.machine main globals 4 functions 5
     .global red 0
     .global green 1
     .global blue 2
+    .global brightness 3
 
     .func init index 0
       PUSH 0
@@ -122,6 +123,8 @@ export const CRAWLER_MACHINE = `
       STORE green
       PUSH 32
       STORE blue
+      PUSH 100
+      STORE brightness
       EXIT
     .end
 
@@ -132,7 +135,12 @@ export const CRAWLER_MACHINE = `
       EXIT
     .end
 
-    .func get_rgb_worker index 3
+    .func set_brightness index 3
+      STORE brightness
+      EXIT
+    .end
+
+    .func get_rgb_worker index 4
       .frame led_index 0
       .frame ticks 1
       PUSH 1000 
@@ -165,14 +173,26 @@ export const CRAWLER_MACHINE = `
       LOAD red
       SWAP
       DIV
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       SWAP    ; Scale green
       DUP
       LOAD green
       SWAP
       DIV
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       SWAP    ; Scale blue
       LOAD blue
       SWAP
+      DIV
+      LOAD brightness
+      MUL
+      PUSH 100
       DIV
       RET 3
     .end
@@ -186,11 +206,12 @@ export const CRAWLER_MACHINE = `
 `;
 
 export const SIMPLE_CRAWLER_MACHINE = `
-.machine main globals 4 functions 5
+.machine main globals 5 functions 6
     .global red 0
     .global green 1
     .global blue 2
     .global speed 3
+    .global brightness 4
 
     .func init index 0
       PUSH 0
@@ -201,6 +222,8 @@ export const SIMPLE_CRAWLER_MACHINE = `
       STORE blue
       PUSH 100
       STORE speed
+      PUSH 100
+      STORE brightness
       EXIT
     .end
 
@@ -211,12 +234,17 @@ export const SIMPLE_CRAWLER_MACHINE = `
       EXIT
     .end
 
-    .func set_speed index 3
+    .func set_brightness index 3
+      STORE brightness
+      EXIT
+    .end
+
+    .func set_speed index 4
       STORE speed
       EXIT
     .end
 
-    .func get_rgb_worker index 4
+    .func get_rgb_worker index 5
       .frame led_index 0
       .frame ticks 1
       LOAD speed
@@ -232,8 +260,20 @@ export const SIMPLE_CRAWLER_MACHINE = `
       RET 3
       match: 
       LOAD red
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       LOAD green
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       LOAD blue
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       RET 3
     .end
 
@@ -251,10 +291,11 @@ export const SIMPLE_CRAWLER_MACHINE = `
 
 
 export const PULSE_MACHINE = `
-.machine main globals 3 functions 3
+.machine main globals 4 functions 4
     .global red 0
     .global green 1
     .global blue 2
+    .global brightness 3
 
     .func init index 0
       PUSH 0
@@ -263,6 +304,8 @@ export const PULSE_MACHINE = `
       STORE green
       PUSH 32
       STORE blue
+      PUSH 100
+      STORE brightness
       EXIT
     .end
 
@@ -270,6 +313,11 @@ export const PULSE_MACHINE = `
       STORE 0
       STORE 1
       STORE 2
+      EXIT
+    .end
+
+    .func set_brightness index 3
+      STORE brightness
       EXIT
     .end
 
@@ -292,8 +340,20 @@ export const PULSE_MACHINE = `
       DIV
       LOAD 0
       ADD
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       LOAD 1
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       LOAD 2
+      LOAD brightness
+      MUL
+      PUSH 100
+      DIV
       EXIT
     .end
 
@@ -308,10 +368,10 @@ export const DEFAULT_MACHINE_RACK = [
     name: "Simple Crawler",
     assembly: SIMPLE_CRAWLER_MACHINE,
     controls: [
-       new MachineControlDescriptor({
+      new MachineControlDescriptor({
         id: "speed",
         label: "Speed",
-        functionId: 3,
+        functionId: 4,
         type: "range",
         min: 10,
         max: 1000,

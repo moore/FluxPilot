@@ -13,12 +13,12 @@ let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
 const DECK_KEY = "__flightDeck__";
 const HANDLERS_BOUND_KEY = "__flightDeckHandlersBound__";
+const GLOBAL_BRIGHTNESS_FUNCTION = 3;
 let usbReadActive = false;
 let pendingRequestId = null;
 let pendingStartTime = 0;
 let pendingTimer = null;
-let pendingColor = null;
-let currentColor = { r: 0, g: 0, b: 0 };
+let pendingCalls = new Map();
 let connectInFlight = false;
 
 class DeckReceiveHandler {
@@ -43,7 +43,7 @@ export async function initDeck() {
     globalThis[DECK_KEY] ??= new FlightDeck();
     if (editorEl && !editorEl.value.trim()) {
         editorEl.value = `
-.machine main globals 3 functions 3
+.machine main globals 4 functions 4
 
 .func init index 0
     push 8
@@ -52,6 +52,8 @@ export async function initDeck() {
     STORE 0
     STORE 1
     STORE 2
+    push 100
+    STORE 3
     EXIT
 .end
 
@@ -59,6 +61,11 @@ export async function initDeck() {
     STORE 0
     STORE 1
     STORE 2
+    EXIT
+.end
+
+.func set_brightness index 3
+    STORE 3
     EXIT
 .end
 
@@ -81,8 +88,20 @@ export async function initDeck() {
     DIV
     LOAD 0
     ADD
+    LOAD 3
+    MUL
+    PUSH 100
+    DIV
     LOAD 1
+    LOAD 3
+    MUL
+    PUSH 100
+    DIV
     LOAD 2
+    LOAD 3
+    MUL
+    PUSH 100
+    DIV
     EXIT
 .end
 
@@ -115,7 +134,9 @@ export function callMachineFunction(machineIndex, functionIndex, args) {
         return null;
     }
     if (pendingRequestId !== null) {
-        setStatus('Waiting for previous request...');
+        const key = `${machineIndex}:${functionIndex}`;
+        pendingCalls.delete(key);
+        pendingCalls.set(key, { machineIndex, functionIndex, args });
         return null;
     }
     try {
@@ -223,10 +244,10 @@ function resolvePending(requestId) {
         clearTimeout(pendingTimer);
         pendingTimer = null;
     }
-    if (pendingColor) {
-        const next = pendingColor;
-        pendingColor = null;
-        scheduleSend(next);
+    if (pendingCalls.size) {
+        const [key, next] = pendingCalls.entries().next().value;
+        pendingCalls.delete(key);
+        callMachineFunction(next.machineIndex, next.functionIndex, next.args);
     }
     return true;
 }
@@ -239,44 +260,40 @@ function setPendingTimeout() {
         pendingTimer = null;
         if (pendingRequestId !== null) {
             pendingRequestId = null;
-            if (pendingColor) {
-                pendingStartTime = performance.now();
-                const next = pendingColor;
-                pendingColor = null;
-                scheduleSend(next);
+            if (pendingCalls.size) {
+                const [key, next] = pendingCalls.entries().next().value;
+                pendingCalls.delete(key);
+                callMachineFunction(next.machineIndex, next.functionIndex, next.args);
             }
         }
     }, 200);
 }
 
-function brightnessScale() {
-    const value = Number(brightnessEl?.value ?? 100);
-    const clamped = Math.max(0, Math.min(100, value));
-    return clamped / 100;
+function getActiveTracks() {
+    const trackList = document.getElementById('track-list');
+    if (!trackList) {
+        return [];
+    }
+    return Array.from(trackList.querySelectorAll('fd-track')).filter((track) => {
+        const machineId = track.dataset.machineId || '';
+        const machineAssembly = track.dataset.machineAssembly || '';
+        return Boolean(machineId || machineAssembly);
+    });
 }
 
-function applyBrightness(color) {
-    const scale = brightnessScale();
-    return {
-        r: Math.round(color.r * scale),
-        g: Math.round(color.g * scale),
-        b: Math.round(color.b * scale),
-    };
-}
-
-function sendSliderColor(color) {
-    if (pendingRequestId !== null) {
-        pendingColor = color;
+function applyGlobalBrightness(value) {
+    const tracks = getActiveTracks();
+    if (!tracks.length) {
         return;
     }
-    const scaled = applyBrightness(color);
-    callMachineFunction(0, 2, [scaled.r, scaled.g, scaled.b]);
-}
-
-function scheduleSend(color) {
-    setTimeout(() => {
-        sendSliderColor(color);
-    }, 0);
+    for (const [key, call] of pendingCalls.entries()) {
+        if (call.functionIndex === GLOBAL_BRIGHTNESS_FUNCTION) {
+            pendingCalls.delete(key);
+        }
+    }
+    tracks.forEach((_track, index) => {
+        callMachineFunction(index, GLOBAL_BRIGHTNESS_FUNCTION, [value]);
+    });
 }
 
 export async function connect() {
@@ -533,11 +550,7 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
         const value = Number(brightnessEl.value);
         const clamped = Math.max(0, Math.min(100, value));
         brightnessValueEl.textContent = `${clamped}%`;
-        if (pendingRequestId !== null) {
-            pendingColor = currentColor;
-        } else {
-            sendSliderColor(currentColor);
-        }
+        applyGlobalBrightness(clamped);
     });
 
     // Initial check
