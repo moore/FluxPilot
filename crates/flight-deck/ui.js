@@ -123,7 +123,7 @@ export const CRAWLER_MACHINE = `
       STORE green
       PUSH 32
       STORE blue
-      PUSH 100
+      PUSH 10
       STORE brightness
       EXIT
     .end
@@ -222,7 +222,7 @@ export const SIMPLE_CRAWLER_MACHINE = `
       STORE blue
       PUSH 100
       STORE speed
-      PUSH 100
+      PUSH 10
       STORE brightness
       EXIT
     .end
@@ -304,7 +304,7 @@ export const PULSE_MACHINE = `
       STORE green
       PUSH 32
       STORE blue
-      PUSH 100
+      PUSH 10
       STORE brightness
       EXIT
     .end
