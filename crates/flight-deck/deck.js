@@ -6,12 +6,9 @@ const statusEls = Array.from(document.querySelectorAll('[data-status-message]'))
 const connectBtn = document.getElementById('connect');
 const statusPillEl = document.getElementById('status-pill');
 const loadProgramBtn = document.getElementById('load-program');
-const sliderEl = document.getElementById('color-slider');
-const sliderValueEl = document.getElementById('slider-value');
 const brightnessEl = document.getElementById('brightness-slider');
 const brightnessValueEl = document.getElementById('brightness-value');
 const editorEl = document.getElementById('program-editor');
-const colorBtns = ['red','green','blue'].map(id => document.getElementById(id));
 let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
 const DECK_KEY = "__flightDeck__";
@@ -196,17 +193,13 @@ function buildProgramSourceFromTracks() {
 function enableControls() { 
     connectBtn.disabled = true;
     loadProgramBtn.disabled = false;
-    sliderEl.disabled = false;
     brightnessEl.disabled = false;
-    colorBtns.forEach(b => b.disabled = false);
 }
 
 function disableControls() {
     connectBtn.disabled = false;
     loadProgramBtn.disabled = true;
-    sliderEl.disabled = true;
     brightnessEl.disabled = true;
-    colorBtns.forEach(b => b.disabled = true);
 }
 
 function handleDisconnect(message) {
@@ -256,26 +249,6 @@ function setPendingTimeout() {
     }, 200);
 }
 
-function sliderToRgb(value) {
-    const clamped = Math.max(0, Math.min(1023, value));
-    const t = clamped / 1023;
-    let r = 0;
-    let g = 0;
-    let b = 0;
-    if (t <= 0.5) {
-        const p = t / 0.5;
-        r = 0;
-        g = Math.round(255 * p);
-        b = Math.round(255 * (1 - p));
-    } else {
-        const p = (t - 0.5) / 0.5;
-        r = Math.round(255 * p);
-        g = Math.round(255 * (1 - p));
-        b = 0;
-    }
-    return { r, g, b };
-}
-
 function brightnessScale() {
     const value = Number(brightnessEl?.value ?? 100);
     const clamped = Math.max(0, Math.min(100, value));
@@ -316,7 +289,7 @@ export async function connect() {
             writer = { port: port.writable.getWriter(), type: 'serial' };
             enableControls();
             setConnectionState(true);
-            setStatus('Connected via Web Serial. Tap a color.');
+            setStatus('Connected via Web USB.');
             port.addEventListener?.('disconnect', () => {
                 handleDisconnect('Device disconnected.');
             });
@@ -410,7 +383,7 @@ async function connectUsbDevice(device) {
         startUsbReceiveLoop(device);
         enableControls();
         setConnectionState(true);
-        setStatus('Connected via WebUSB. Tap a color.');
+        setStatus('Connected via WebUSB.');
     } finally {
         connectInFlight = false;
     }
@@ -556,19 +529,6 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
         }
     });
 
-    sliderEl?.addEventListener('input', () => {
-        const value = Number(sliderEl.value);
-        sliderValueEl.textContent = `${value}`;
-        const color = sliderToRgb(value);
-        currentColor = color;
-        
-        if (pendingRequestId !== null) {
-            pendingColor = color;
-        } else {
-            sendSliderColor(color);
-        }
-    });
-
     brightnessEl?.addEventListener('input', () => {
         const value = Number(brightnessEl.value);
         const clamped = Math.max(0, Math.min(100, value));
@@ -579,18 +539,6 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
             sendSliderColor(currentColor);
         }
     });
-
-    const colorCalls = [
-        { r: 255, g: 0, b: 0 },
-        { r: 0, g: 255, b: 0 },
-        { r: 0, g: 0, b: 255 },
-    ];
-
-    colorCalls.forEach((color, i) => colorBtns[i]?.addEventListener('click', () => {
-        currentColor = color;
-        const scaled = applyBrightness(color);
-        callMachineFunction(0, 2, [scaled.r, scaled.g, scaled.b]);
-    }));
 
     // Initial check
     if (!('serial' in navigator) && !('usb' in navigator)) {
