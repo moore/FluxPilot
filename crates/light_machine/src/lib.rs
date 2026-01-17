@@ -138,6 +138,8 @@ pub enum MachineError {
     StackOverflow,
     #[error("attempted opperation would underflow the stack")]
     StackUnderFlow,
+    #[error("there are not enogh arguments to call the function")]
+    TwoFewArguments,
     #[error("word {0} out of range of color value")]
     ColorOutOfRange(Word),
     #[error("indesx {0} out of range of static data")]
@@ -283,6 +285,9 @@ impl<'a, 'b> Program<'a, 'b> {
         tick: u16,
         stack: &mut Vec<Word, STACK_SIZE>,
     ) -> Result<(u8, u8, u8), MachineError> {
+        if stack.len() < 3 {
+            return Err(MachineError::TwoFewArguments);
+        }
         stack.push(index).map_err(|_| MachineError::StackOverflow)?;
         stack.push(tick).map_err(|_| MachineError::StackOverflow)?;
 

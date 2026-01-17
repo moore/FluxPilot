@@ -76,6 +76,9 @@ fn test_init_get_color() -> Result<(), MachineError> {
 
         println!("stack is {:?}", stack);
 
+        stack.push(0).unwrap();
+        stack.push(0).unwrap();
+        stack.push(0).unwrap();
         let (r, g, b) = program
             .get_led_color(0, 31337, 17, &mut stack)
             .expect("Could not get led color");
@@ -84,8 +87,9 @@ fn test_init_get_color() -> Result<(), MachineError> {
         assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
     }
 
-    assert_eq!(stack.len(), 2); // 1 becouse we leave the led index on the stack in our test
-    assert_eq!((stack[0], stack[1]), (31337, 17));
+    assert_eq!(stack.len(), 5);
+    assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
+    assert_eq!((stack[3], stack[4]), (31337, 17));
     Ok(())
 }
 
@@ -135,6 +139,9 @@ fn test_init_get_color2() -> Result<(), MachineError> {
 
         println!("stack is {:?}", stack);
 
+        stack.push(0).unwrap();
+        stack.push(0).unwrap();
+        stack.push(0).unwrap();
         let (r, g, b) = program
             .get_led_color(0, 31337, 1, &mut stack)
             .expect("Could not get led color");
@@ -142,10 +149,14 @@ fn test_init_get_color2() -> Result<(), MachineError> {
         println!("stack is {:?}", stack);
         assert_eq!((r as u16, g as u16, b as u16), (red, green, blue + 1));
 
-        assert_eq!(stack.len(), 1); // 1 becouse we leave the led index on the stack in our test
-        assert_eq!((stack[0]), (31337));    
+        assert_eq!(stack.len(), 4);
+        assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
+        assert_eq!(stack[3], 31337);
         stack.clear();
 
+        stack.push(0).unwrap();
+        stack.push(0).unwrap();
+        stack.push(0).unwrap();
         let (r, g, b) = program
             .get_led_color(0, 31337, 30, &mut stack)
             .expect("Could not get led color");
@@ -154,8 +165,9 @@ fn test_init_get_color2() -> Result<(), MachineError> {
         assert_eq!((r as u16, g as u16, b as u16), (red, green, blue + 30));
     }
 
-    assert_eq!(stack.len(), 1); // 1 becouse we leave the led index on the stack in our test
-    assert_eq!((stack[0]), (31337));
+    assert_eq!(stack.len(), 4);
+    assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
+    assert_eq!(stack[3], 31337);
     Ok(())
 }
 

@@ -23,7 +23,7 @@ type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
 fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut buffer = [0u16; 30];
     const MACHINE_COUNT: usize = 1;
-    const FUNCTION_COUNT: usize = 2;
+    const FUNCTION_COUNT: usize = 3;
     let program_builder =
         ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as u16)
             .expect("could not get machine builder");
@@ -36,9 +36,6 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut function = machine
         .new_function()
         .expect("could not get fucntion builder");
-    function.add_op(Op::Store(0)).expect("could not add op");
-    function.add_op(Op::Store(1)).expect("could not add op");
-    function.add_op(Op::Store(2)).expect("could not add op");
     function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 
@@ -48,6 +45,15 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     function.add_op(Op::Load(0)).expect("could not add op");
     function.add_op(Op::Load(1)).expect("could not add op");
     function.add_op(Op::Load(2)).expect("could not add op");
+    function.add_op(Op::Exit).expect("could not add op");
+    let (_, machine) = function.finish().expect("Could not finish function");
+
+    let mut function = machine
+        .new_function()
+        .expect("could not get fucntion builder");
+    function.add_op(Op::Store(0)).expect("could not add op");
+    function.add_op(Op::Store(1)).expect("could not add op");
+    function.add_op(Op::Store(2)).expect("could not add op");
     function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 
@@ -93,7 +99,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         args.push(green).unwrap();
         args.push(blue).unwrap();
 
-        let store_function_index = descriptor.machines[0].functions[0].clone();
+        let store_function_index = descriptor.machines[0].functions[2].clone();
         let function = FunctionId {
             machine_index: 0,
             function_index: store_function_index.into(),

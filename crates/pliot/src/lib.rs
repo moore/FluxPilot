@@ -115,13 +115,20 @@ impl<
     }
 
     pub fn init<const STACK_SIZE: usize>(&mut self, stack: &mut Vec<Word, STACK_SIZE>) -> Result<(), PliotError> {
-        let function = FunctionId {
-            machine_index: 0, // BUG: We should iterite over each machine
-            function_index: 0,
-        };
-        let args = Vec::new();
-        let _ = self.call(stack, function, &args)?;
+        let progroam_unmber = ProgramNumber(0);
+        let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
+        let machine_count = program.machine_count()?;
+        for machine_index in 0..machine_count {
+            stack.clear();
+            program.init_machine(machine_index, stack)?;
+        }
         Ok(())
+    }
+
+    pub fn machine_count(&mut self) -> Result<Word, PliotError> {
+        let progroam_unmber = ProgramNumber(0);
+        let program = self.storage.get_program(progroam_unmber, self.memory)?;
+        Ok(program.machine_count()?)
     }
 
 

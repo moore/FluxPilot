@@ -328,11 +328,52 @@ async fn led_task(
         {
             let mut guard = shared.lock().await;
             let PliotShared { pliot, stack } = &mut *guard;
-            for (i, led) in data.iter_mut().enumerate() {
-                if let Ok((red, green, blue)) = pliot.get_led_color(0, i as u16, tick, stack) {
-                    *led = (red, green, blue).into();
-                    stack.clear();
+            let machine_count = match pliot.machine_count() {
+                Ok(count) => count,
+                Err(_) => {
+                    // BUG: Log
+                    return
+                },
+            };
+            let seed_stack = |stack: &mut Vec<Word, 100>, red: u8, green: u8, blue: u8| -> bool {
+                stack.clear();
+                if stack.push(red as Word).is_err() {
+                    return false;
                 }
+                if stack.push(green as Word).is_err() {
+                    stack.clear();
+                    return false;
+                }
+                if stack.push(blue as Word).is_err() {
+                    stack.clear();
+                    return false;
+                }
+                true
+            };
+            for (i, led) in data.iter_mut().enumerate() {
+                let mut red = 0u8;
+                let mut green = 0u8;
+                let mut blue = 0u8;
+                if !seed_stack(stack, red, green, blue) {
+                    continue;
+                }
+                for machine_number in 0..machine_count {
+                    match pliot.get_led_color(machine_number, i as u16, tick, stack) {
+                        Ok((next_red, next_green, next_blue)) => {
+                            red = next_red;
+                            green = next_green;
+                            blue = next_blue;
+                            if !seed_stack(stack, red, green, blue) {
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            stack.clear();
+                            break;
+                        }
+                    }
+                }
+                *led = (red, green, blue).into();
             }
         }
 

@@ -143,6 +143,8 @@ export const CRAWLER_MACHINE = `
     .func get_rgb_worker index 4
       .frame led_index 0
       .frame ticks 1
+      SLOAD led_index
+      SLOAD ticks
       PUSH 1000 
       MOD ; count up 1 second
       DUP         
@@ -247,6 +249,11 @@ export const SIMPLE_CRAWLER_MACHINE = `
     .func get_rgb_worker index 5
       .frame led_index 0
       .frame ticks 1
+      .frame sred 2
+      .frame sblue 3
+      .frame sgreen 4
+      SLOAD led_index
+      SLOAD ticks
       LOAD speed
       MOD ; count up 1 second
       LOAD speed
@@ -254,9 +261,9 @@ export const SIMPLE_CRAWLER_MACHINE = `
       DIV
       DIV
       BREQ match
-      PUSH 0
-      PUSH 0
-      PUSH 0
+      SLOAD sred
+      SLOAD sblue
+      SLOAD sgreen
       RET 3
       match: 
       LOAD red
@@ -322,6 +329,13 @@ export const PULSE_MACHINE = `
     .end
 
     .func get_rgb index 1 ; Stack [index, tick]
+      .frame led_index 0
+      .frame ticks 1
+      .frame sred 2
+      .frame sblue 3
+      .frame sgreen 4
+      SLOAD led_index
+      SLOAD ticks
       DUP
       PUSH 120
       MOD
