@@ -129,9 +129,9 @@ export const CRAWLER_MACHINE = `
     .end
 
     .func set_rgb index 2
-      STORE red
+      STORE blue
       STORE green
-      STORE blue  
+      STORE red
       EXIT
     .end
 
@@ -142,8 +142,8 @@ export const CRAWLER_MACHINE = `
 
     .func get_rgb_worker index 4
       .frame sred 0
-      .frame sblue 1
-      .frame sgreen 2
+      .frame sgreen 1
+      .frame sblue 2
       .frame led_index 3
       .frame ticks 4
       SLOAD led_index
@@ -233,9 +233,9 @@ export const SIMPLE_CRAWLER_MACHINE = `
     .end
 
     .func set_rgb index 2
-      STORE red
-      STORE green
       STORE blue
+      STORE green
+      STORE red
       EXIT
     .end
 
@@ -251,8 +251,8 @@ export const SIMPLE_CRAWLER_MACHINE = `
 
     .func get_rgb_worker index 5
       .frame sred 0
-      .frame sblue 1
-      .frame sgreen 2
+      .frame sgreen 1
+      .frame sblue 2
       .frame led_index 3
       .frame ticks 4
       SLOAD led_index
@@ -265,8 +265,8 @@ export const SIMPLE_CRAWLER_MACHINE = `
       DIV
       BREQ match
       SLOAD sred
-      SLOAD sblue
       SLOAD sgreen
+      SLOAD sblue
       RET 3
       match: 
       LOAD red
@@ -320,9 +320,9 @@ export const PULSE_MACHINE = `
     .end
 
     .func set_rgb index 2
-      STORE red
-      STORE green
       STORE blue
+      STORE green
+      STORE red
       EXIT
     .end
 
@@ -333,8 +333,8 @@ export const PULSE_MACHINE = `
 
     .func get_rgb index 1 ; Stack [index, tick]
       .frame sred 0
-      .frame sblue 1
-      .frame sgreen 2
+      .frame sgreen 1
+      .frame sblue 2
       .frame led_index 3
       .frame ticks 4
       SLOAD led_index

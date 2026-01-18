@@ -58,9 +58,9 @@ export async function initDeck() {
 .end
 
 .func set_rgb index 2
-    STORE 0
-    STORE 1
     STORE 2
+    STORE 1
+    STORE 0
     EXIT
 .end
 

@@ -296,7 +296,7 @@ impl<'a, 'b> Program<'a, 'b> {
 
         self.run(machine_number, entry_point, stack)?;
 
-        let Some(red) = stack.pop() else {
+        let Some(blue) = stack.pop() else {
             return Err(MachineError::StackUnderFlow);
         };
 
@@ -304,7 +304,7 @@ impl<'a, 'b> Program<'a, 'b> {
             return Err(MachineError::StackUnderFlow);
         };
 
-        let Some(blue) = stack.pop() else {
+        let Some(red) = stack.pop() else {
             return Err(MachineError::StackUnderFlow);
         };
 

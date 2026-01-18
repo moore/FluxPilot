@@ -274,12 +274,14 @@ impl<
         let Ok(function_index) = function.function_index.try_into() else {
             return Err(PliotError::FunctionIndexOutOfRange);
         };
+        stack.clear();
 
         for arg in args {
             if stack.push(*arg).is_err() {
                 Err(MachineError::StackOverflow)?;
             }
         }
+        
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
 
