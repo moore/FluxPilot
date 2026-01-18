@@ -110,11 +110,11 @@ function sendControlCall(element, control, args) {
 }
 
 export const CRAWLER_MACHINE = `
-.machine main globals 4 functions 5
-    .global red 0
-    .global green 1
-    .global blue 2
-    .global brightness 3
+.machine main locals 4 functions 5
+    .local red 0
+    .local green 1
+    .local blue 2
+    .local brightness 3
 
     .func init index 0
       PUSH 0
@@ -129,9 +129,9 @@ export const CRAWLER_MACHINE = `
     .end
 
     .func set_rgb index 2
-      STORE 0
-      STORE 1
-      STORE 2
+      STORE red
+      STORE green
+      STORE blue  
       EXIT
     .end
 
@@ -141,8 +141,11 @@ export const CRAWLER_MACHINE = `
     .end
 
     .func get_rgb_worker index 4
-      .frame led_index 0
-      .frame ticks 1
+      .frame sred 0
+      .frame sblue 1
+      .frame sgreen 2
+      .frame led_index 3
+      .frame ticks 4
       SLOAD led_index
       SLOAD ticks
       PUSH 1000 
@@ -200,7 +203,7 @@ export const CRAWLER_MACHINE = `
     .end
 
     .func get_rgb index 1
-      PUSH 2
+      PUSH 5
       CALL get_rgb_worker
       EXIT
     .end
@@ -208,12 +211,12 @@ export const CRAWLER_MACHINE = `
 `;
 
 export const SIMPLE_CRAWLER_MACHINE = `
-.machine main globals 5 functions 6
-    .global red 0
-    .global green 1
-    .global blue 2
-    .global speed 3
-    .global brightness 4
+.machine main locals 5 functions 6
+    .local red 0
+    .local green 1
+    .local blue 2
+    .local speed 3
+    .local brightness 4
 
     .func init index 0
       PUSH 0
@@ -231,8 +234,8 @@ export const SIMPLE_CRAWLER_MACHINE = `
 
     .func set_rgb index 2
       STORE red
-      STORE blue
       STORE green
+      STORE blue
       EXIT
     .end
 
@@ -247,11 +250,11 @@ export const SIMPLE_CRAWLER_MACHINE = `
     .end
 
     .func get_rgb_worker index 5
-      .frame led_index 0
-      .frame ticks 1
-      .frame sred 2
-      .frame sblue 3
-      .frame sgreen 4
+      .frame sred 0
+      .frame sblue 1
+      .frame sgreen 2
+      .frame led_index 3
+      .frame ticks 4
       SLOAD led_index
       SLOAD ticks
       LOAD speed
@@ -285,7 +288,7 @@ export const SIMPLE_CRAWLER_MACHINE = `
     .end
 
     .func get_rgb index 1
-      PUSH 2
+      PUSH 5
       CALL get_rgb_worker
       EXIT
     .end
@@ -298,11 +301,11 @@ export const SIMPLE_CRAWLER_MACHINE = `
 
 
 export const PULSE_MACHINE = `
-.machine main globals 4 functions 4
-    .global red 0
-    .global green 1
-    .global blue 2
-    .global brightness 3
+.machine main locals 4 functions 4
+    .local red 0
+    .local green 1
+    .local blue 2
+    .local brightness 3
 
     .func init index 0
       PUSH 0
@@ -317,9 +320,9 @@ export const PULSE_MACHINE = `
     .end
 
     .func set_rgb index 2
-      STORE 0
-      STORE 1
-      STORE 2
+      STORE red
+      STORE green
+      STORE blue
       EXIT
     .end
 
@@ -329,11 +332,11 @@ export const PULSE_MACHINE = `
     .end
 
     .func get_rgb index 1 ; Stack [index, tick]
-      .frame led_index 0
-      .frame ticks 1
-      .frame sred 2
-      .frame sblue 3
-      .frame sgreen 4
+      .frame sred 0
+      .frame sblue 1
+      .frame sgreen 2
+      .frame led_index 3
+      .frame ticks 4
       SLOAD led_index
       SLOAD ticks
       DUP
@@ -392,6 +395,23 @@ export const DEFAULT_MACHINE_RACK = [
         step: 10,
         defaultValue: 1000,
       }),
+      new MachineControlDescriptor({
+        id: "brigntness",
+        label: "Brightness",
+        functionId: 3,
+        type: "range",
+        min: 10,
+        max: 100,
+        step: 1,
+        defaultValue: 30,
+      }),
+      new MachineControlDescriptor({
+        id: "rainbow",
+        label: "Pick Color",
+        functionId: 2,
+        type: "color_picker",
+        defaultValue: "#468bc0ff",
+      }),
     ],
   }),
   new MachineDescriptor({
@@ -439,7 +459,7 @@ trackTpl.innerHTML = `
     <span class="chip track-meta"></span>
     <div class="track-editor">
       <label>Assembly</label>
-      <textarea spellcheck="false" placeholder=".machine main globals 0 functions 0"></textarea>
+      <textarea spellcheck="false" placeholder=".machine main locals 0 functions 0"></textarea>
     </div>
   </div>
 `;

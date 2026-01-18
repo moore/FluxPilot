@@ -43,7 +43,7 @@ export async function initDeck() {
     globalThis[DECK_KEY] ??= new FlightDeck();
     if (editorEl && !editorEl.value.trim()) {
         editorEl.value = `
-.machine main globals 4 functions 4
+.machine main locals 4 functions 4
 
 .func init index 0
     push 8

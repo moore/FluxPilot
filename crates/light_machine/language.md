@@ -13,7 +13,7 @@ to opcodes and word data.
 - Easy to add or rename opcodes in one table.
 - Minimal syntax sugar; keep it close to the VM's u16 word stream.
 - Labels for readability.
-- A clear place for globals size, machines, and functions.
+- A clear place for locals size, machines, and functions.
 
 ## File structure
 
@@ -21,13 +21,17 @@ A source file is a sequence of directives and instructions.
 
 Directives (top-level):
 
-- `.machine <name> globals <N> functions <M>`: starts a new machine.
+- `.machine <name> locals <N> functions <M>`: starts a new machine (locals are per-machine state).
 - `.func <name> [index <I>]`: starts a new function within the current machine.
 - `.func_decl <name> [index <I>]`: declares a function without a body.
 - `.data <name>`: starts a static data block (u16 words).
-- `.global <name> <index>`: declares a named global index for LOAD/STORE.
+- `.shared <name> <index>`: declares a named shared global index (program-scoped).
 - `.frame <name> <offset>`: declares a named stack slot for SLOAD/SSTORE.
 - `.end`: ends the current machine, function, or data block.
+
+Directives (machine-level):
+
+- `.local <name> <index>`: declares a named local global index for LOAD/STORE.
 
 Notes:
 
@@ -38,6 +42,10 @@ Notes:
   assembler. A later `.func` with the same name must provide the body.
 - `.data` blocks can appear anywhere inside a machine and can be referenced by
   labels when `LOAD_STATIC` is implemented.
+- `.shared` must be declared before any `.machine`.
+- `.global` is accepted as a deprecated alias for `.local`.
+- `.machine` accepts `globals` as a deprecated alias for `locals`.
+- `LOAD`/`STORE` numeric operands are treated as local indices; use `.shared` labels for shared state.
 - Labels are allowed in functions and data blocks.
   Inside `.data`, either use `.word <number>` or a bare `<number>` per line.
 
@@ -151,7 +159,11 @@ assembler should emit a valid header based on `.machine` and `.func` blocks.
 
 This example mirrors the test program used in code:
 
-    .machine main globals 3 functions 2
+    .machine main locals 3 functions 2
+
+    .local red 0
+    .local green 1
+    .local blue 2
 
     .func set_rgb index 0
         STORE 0
@@ -178,9 +190,10 @@ Whitespace and comments can appear between any tokens.
     item           = directive | instruction | label | data_word | empty ;
     empty          = ;
 
-    directive      = machine_decl | func_decl | func_forward_decl | data_decl | end_decl ;
-    machine_decl   = ".machine" ident "globals" number "functions" number ;
-    global_decl    = ".global" ident number ;
+    directive      = machine_decl | shared_decl | local_decl | stack_decl | func_decl | func_forward_decl | data_decl | end_decl ;
+    machine_decl   = ".machine" ident "locals" number "functions" number ;
+    shared_decl    = ".shared" ident number ;
+    local_decl     = ".local" ident number ;
     stack_decl     = ".frame" ident number ;
     func_decl      = ".func" ident [ "index" number ] ;
     func_forward_decl = ".func_decl" ident [ "index" number ] ;
@@ -221,7 +234,7 @@ Whitespace and comments can appear between any tokens.
   `.func_decl`. Multiple bodies for the same name are an error.
 - Labels resolve to word indices within the current block.
 - `operand` label references resolve to the word index of the label in the same
-  function or data block, to a named global declared with `.global`, or to a named
+  function or data block, to a named local declared with `.local`, or to a named
   stack slot declared with `.frame` (for SLOAD/SSTORE).
 - `.end` closes the most recent open block (function/data first, then machine).
 - Instructions are only valid inside `.func` blocks; `.data` blocks accept only

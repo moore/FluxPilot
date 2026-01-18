@@ -35,9 +35,50 @@ fn run_single(
 }
 
 #[test]
+fn test_locals_are_machine_scoped() -> Result<(), MachineError> {
+    let mut buffer = [0u16; 256];
+    let builder = ProgramBuilder::<2, 1>::new(&mut buffer, 2).unwrap();
+    let mut asm: Assembler<2, 1, 16, 16> = Assembler::new(builder);
+
+    asm.add_line(".machine first locals 1 functions 1").unwrap();
+    asm.add_line(".func set index 0").unwrap();
+    asm.add_line("STORE 0").unwrap();
+    asm.add_line("EXIT").unwrap();
+    asm.add_line(".end").unwrap();
+    asm.add_line(".end").unwrap();
+
+    asm.add_line(".machine second locals 1 functions 1").unwrap();
+    asm.add_line(".func set index 0").unwrap();
+    asm.add_line("STORE 0").unwrap();
+    asm.add_line("EXIT").unwrap();
+    asm.add_line(".end").unwrap();
+    asm.add_line(".end").unwrap();
+
+    let descriptor = asm.finish().unwrap();
+    let program = &buffer[..descriptor.length];
+    let mut globals = [0u16; 2];
+    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+
+    {
+        let mut program = Program::new(program, globals.as_mut_slice())?;
+        stack.push(11).unwrap();
+        program.call(0, 0, &mut stack)?;
+    }
+    assert_eq!(globals, [11, 0]);
+
+    {
+        let mut program = Program::new(program, globals.as_mut_slice())?;
+        stack.push(22).unwrap();
+        program.call(1, 0, &mut stack)?;
+    }
+    assert_eq!(globals, [11, 22]);
+    Ok(())
+}
+
+#[test]
 fn test_init_get_color() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 3 functions 2",
+        ".machine main locals 3 functions 2",
         ".func set_rgb index 0",
         "STORE 0",
         "STORE 1",
@@ -97,7 +138,7 @@ fn test_init_get_color() -> Result<(), MachineError> {
 #[test]
 fn test_init_get_color2() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 3 functions 2",
+        ".machine main locals 3 functions 2",
         ".func set_rgb index 0",
         "STORE 0",
         "STORE 1",
@@ -175,7 +216,7 @@ fn test_init_get_color2() -> Result<(), MachineError> {
 #[test]
 fn op_push() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 42",
         "EXIT",
@@ -192,7 +233,7 @@ fn op_push() -> Result<(), MachineError> {
 #[test]
 fn op_pop() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "POP",
@@ -210,7 +251,7 @@ fn op_pop() -> Result<(), MachineError> {
 #[test]
 fn op_dup() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 5",
         "DUP",
@@ -228,7 +269,7 @@ fn op_dup() -> Result<(), MachineError> {
 #[test]
 fn op_swap() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "PUSH 2",
@@ -247,7 +288,7 @@ fn op_swap() -> Result<(), MachineError> {
 #[test]
 fn op_sload() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 10",
         "PUSH 20",
@@ -266,7 +307,7 @@ fn op_sload() -> Result<(), MachineError> {
 #[test]
 fn op_sload_named() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         ".frame first 0",
         ".frame second 1",
@@ -288,7 +329,7 @@ fn op_sload_named() -> Result<(), MachineError> {
 #[test]
 fn op_sstore() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "PUSH 2",
@@ -308,7 +349,7 @@ fn op_sstore() -> Result<(), MachineError> {
 #[test]
 fn op_sstore_named() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         ".frame replace 0",
         ".frame keep 1",
@@ -330,7 +371,7 @@ fn op_sstore_named() -> Result<(), MachineError> {
 #[test]
 fn op_load() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 1 functions 1",
+        ".machine main locals 1 functions 1",
         ".func main index 0",
         "LOAD 0",
         "EXIT",
@@ -347,7 +388,7 @@ fn op_load() -> Result<(), MachineError> {
 #[test]
 fn op_store() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 1 functions 1",
+        ".machine main locals 1 functions 1",
         ".func main index 0",
         "PUSH 7",
         "STORE 0",
@@ -366,9 +407,9 @@ fn op_store() -> Result<(), MachineError> {
 #[test]
 fn op_load_named_global() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 2 functions 1",
-        ".global red 0",
-        ".global blue 1",
+        ".machine main locals 2 functions 1",
+        ".local red 0",
+        ".local blue 1",
         ".func main index 0",
         "LOAD red",
         "LOAD blue",
@@ -386,9 +427,9 @@ fn op_load_named_global() -> Result<(), MachineError> {
 #[test]
 fn op_store_named_global() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 2 functions 1",
-        ".global red 0",
-        ".global blue 1",
+        ".machine main locals 2 functions 1",
+        ".local red 0",
+        ".local blue 1",
         ".func main index 0",
         "PUSH 55",
         "STORE red",
@@ -409,7 +450,7 @@ fn op_store_named_global() -> Result<(), MachineError> {
 #[test]
 fn op_load_static() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".data consts",
         "consts:",
         ".word 123",
@@ -430,7 +471,7 @@ fn op_load_static() -> Result<(), MachineError> {
 #[test]
 fn op_jump() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "JUMP target",
         "PUSH 1",
@@ -451,7 +492,7 @@ fn op_jump() -> Result<(), MachineError> {
 #[test]
 fn op_branch_less_than() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "PUSH 2",
@@ -474,7 +515,7 @@ fn op_branch_less_than() -> Result<(), MachineError> {
 #[test]
 fn op_branch_less_than_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 3",
         "PUSH 2",
@@ -497,7 +538,7 @@ fn op_branch_less_than_false() -> Result<(), MachineError> {
 #[test]
 fn op_branch_less_than_eq() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 2",
         "PUSH 2",
@@ -520,7 +561,7 @@ fn op_branch_less_than_eq() -> Result<(), MachineError> {
 #[test]
 fn op_branch_less_than_eq_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 2",
         "PUSH 1",
@@ -543,7 +584,7 @@ fn op_branch_less_than_eq_false() -> Result<(), MachineError> {
 #[test]
 fn op_branch_greater_than() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 3",
         "PUSH 2",
@@ -566,7 +607,7 @@ fn op_branch_greater_than() -> Result<(), MachineError> {
 #[test]
 fn op_branch_greater_than_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 2",
         "PUSH 3",
@@ -589,7 +630,7 @@ fn op_branch_greater_than_false() -> Result<(), MachineError> {
 #[test]
 fn op_branch_greater_than_eq() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 2",
         "PUSH 2",
@@ -612,7 +653,7 @@ fn op_branch_greater_than_eq() -> Result<(), MachineError> {
 #[test]
 fn op_branch_greater_than_eq_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "PUSH 2",
@@ -635,7 +676,7 @@ fn op_branch_greater_than_eq_false() -> Result<(), MachineError> {
 #[test]
 fn op_branch_equal() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 5",
         "PUSH 5",
@@ -658,7 +699,7 @@ fn op_branch_equal() -> Result<(), MachineError> {
 #[test]
 fn op_branch_equal_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 5",
         "PUSH 6",
@@ -681,7 +722,7 @@ fn op_branch_equal_false() -> Result<(), MachineError> {
 #[test]
 fn op_and() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "PUSH 2",
@@ -700,7 +741,7 @@ fn op_and() -> Result<(), MachineError> {
 #[test]
 fn op_and_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "PUSH 0",
@@ -719,7 +760,7 @@ fn op_and_false() -> Result<(), MachineError> {
 #[test]
 fn op_or() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0",
         "PUSH 2",
@@ -738,7 +779,7 @@ fn op_or() -> Result<(), MachineError> {
 #[test]
 fn op_or_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0",
         "PUSH 0",
@@ -757,7 +798,7 @@ fn op_or_false() -> Result<(), MachineError> {
 #[test]
 fn op_xor() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0",
         "PUSH 2",
@@ -776,7 +817,7 @@ fn op_xor() -> Result<(), MachineError> {
 #[test]
 fn op_xor_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "PUSH 1",
@@ -795,7 +836,7 @@ fn op_xor_false() -> Result<(), MachineError> {
 #[test]
 fn op_not() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0",
         "NOT",
@@ -813,7 +854,7 @@ fn op_not() -> Result<(), MachineError> {
 #[test]
 fn op_not_false() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "NOT",
@@ -831,7 +872,7 @@ fn op_not_false() -> Result<(), MachineError> {
 #[test]
 fn op_bitwise_and() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0x0F0F",
         "PUSH 0x00FF",
@@ -850,7 +891,7 @@ fn op_bitwise_and() -> Result<(), MachineError> {
 #[test]
 fn op_bitwise_or() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0x0F0F",
         "PUSH 0x00F0",
@@ -869,7 +910,7 @@ fn op_bitwise_or() -> Result<(), MachineError> {
 #[test]
 fn op_bitwise_xor() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0x0F0F",
         "PUSH 0x00FF",
@@ -888,7 +929,7 @@ fn op_bitwise_xor() -> Result<(), MachineError> {
 #[test]
 fn op_bitwise_not() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 0x00FF",
         "BNOT",
@@ -906,7 +947,7 @@ fn op_bitwise_not() -> Result<(), MachineError> {
 #[test]
 fn op_multiply() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 6",
         "PUSH 7",
@@ -925,7 +966,7 @@ fn op_multiply() -> Result<(), MachineError> {
 #[test]
 fn op_divide() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 84",
         "PUSH 7",
@@ -944,7 +985,7 @@ fn op_divide() -> Result<(), MachineError> {
 #[test]
 fn op_mod() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 29",
         "PUSH 5",
@@ -963,7 +1004,7 @@ fn op_mod() -> Result<(), MachineError> {
 #[test]
 fn op_add() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 5",
         "PUSH 7",
@@ -982,7 +1023,7 @@ fn op_add() -> Result<(), MachineError> {
 #[test]
 fn op_subtract() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 10",
         "PUSH 3",
@@ -1001,7 +1042,7 @@ fn op_subtract() -> Result<(), MachineError> {
 #[test]
 fn op_exit() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 1",
+        ".machine main locals 0 functions 1",
         ".func main index 0",
         "PUSH 1",
         "EXIT",
@@ -1019,7 +1060,7 @@ fn op_exit() -> Result<(), MachineError> {
 #[test]
 fn op_return() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main globals 0 functions 2",
+        ".machine main locals 0 functions 2",
         ".func helper index 1",
         "PUSH 66",
         "PUSH 77",

@@ -111,6 +111,7 @@ pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MA
     fixups: Vec<Fixup, LABEL_CAP>,
     funcs: Vec<FuncEntry, FUNCTION_COUNT_MAX>,
     globals: Vec<Label, LABEL_CAP>,
+    shared_globals: Vec<Label, LABEL_CAP>,
     stack_slots: Vec<Label, LABEL_CAP>,
     data: Vec<Word, DATA_CAP>,
     cursor: Word,
@@ -118,6 +119,9 @@ pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MA
     next_function_index: Word,
     function_count: Word,
     globals_size: Word,
+    globals_base: Word,
+    shared_globals_size: Word,
+    shared_globals_locked: bool,
     line_number: u32,
 }
 
@@ -135,6 +139,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             fixups: Vec::new(),
             funcs: Vec::new(),
             globals: Vec::new(),
+            shared_globals: Vec::new(),
             stack_slots: Vec::new(),
             data: Vec::new(),
             cursor: 0,
@@ -142,6 +147,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             next_function_index: 0,
             function_count: 0,
             globals_size: 0,
+            globals_base: 0,
+            shared_globals_size: 0,
+            shared_globals_locked: false,
             line_number: 0,
         }
     }
@@ -241,7 +249,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ".machine" => self.start_machine(tokens),
             ".func" => self.start_function(tokens),
             ".func_decl" => self.declare_function(tokens),
-            ".global" => self.declare_global(tokens),
+            ".global" => self.declare_local(tokens),
+            ".local" => self.declare_local(tokens),
+            ".shared" => self.declare_shared(tokens),
             ".frame" => self.declare_stack_slot(tokens),
             ".data" => self.start_data(tokens),
             ".end" => self.end_block(),
@@ -254,9 +264,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
         }
         // Strict token shape keeps the grammar unambiguous.
-        let globals_token = tokens.get(2).copied();
+        let locals_token = tokens.get(2).copied();
         let functions_token = tokens.get(4).copied();
-        if tokens.len() != 6 || globals_token != Some("globals") || functions_token != Some("functions") {
+        if tokens.len() != 6
+            || !matches!(locals_token, Some("locals") | Some("globals"))
+            || functions_token != Some("functions")
+        {
             return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
         }
         let globals_size = parse_word(tokens.get(3).ok_or(AssemblerError::Kind(
@@ -278,13 +291,19 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             .program
             .take()
             .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingProgram))?;
+        let mut program = program;
+        if !self.shared_globals_locked {
+            program.set_shared_globals_size(self.shared_globals_size)?;
+            self.shared_globals_locked = true;
+        }
         let machine = program.new_machine(function_count, globals_size)?;
+        self.globals_base = machine.globals_offset();
         self.machine = Some(machine);
         self.block = BlockKind::Machine;
         Ok(())
     }
 
-    fn declare_global(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
+    fn declare_local(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
         if !matches!(self.block, BlockKind::Machine) {
             return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
         }
@@ -297,6 +316,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         if self.globals.iter().any(|entry| entry.name == name) {
             return Err(AssemblerError::Kind(AssemblerErrorKind::DuplicateGlobal));
         }
+        if self.shared_globals.iter().any(|entry| entry.name == name) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::DuplicateGlobal));
+        }
         let index = parse_word(tokens.get(2).ok_or(AssemblerError::Kind(
             AssemblerErrorKind::InvalidDirective,
         ))?)?;
@@ -305,7 +327,39 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 AssemblerErrorKind::GlobalIndexOutOfRange,
             ));
         }
+        let offset = self
+            .globals_base
+            .checked_add(index)
+            .ok_or(AssemblerError::Kind(AssemblerErrorKind::GlobalIndexOutOfRange))?;
         self.globals
+            .push(Label { name, offset })
+            .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
+        Ok(())
+    }
+
+    fn declare_shared(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
+        if !matches!(self.block, BlockKind::None) || self.shared_globals_locked {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
+        }
+        if tokens.len() != 3 {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+        }
+        let name = to_name(tokens.get(1).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        if self.shared_globals.iter().any(|entry| entry.name == name) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::DuplicateGlobal));
+        }
+        let index = parse_word(tokens.get(2).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        let next_size = index
+            .checked_add(1)
+            .ok_or(AssemblerError::Kind(AssemblerErrorKind::GlobalIndexOutOfRange))?;
+        if next_size > self.shared_globals_size {
+            self.shared_globals_size = next_size;
+        }
+        self.shared_globals
             .push(Label { name, offset: index })
             .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
         Ok(())
@@ -681,6 +735,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ))?;
             if matches!(mnemonic, "SLOAD" | "sload" | "SSTORE" | "sstore") {
                 self.resolve_stack_operand(token)?
+            } else if matches!(mnemonic, "LOAD" | "load" | "STORE" | "store") {
+                self.resolve_global_operand(token)?
             } else {
                 self.resolve_operand(token)?
             }
@@ -757,6 +813,9 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         if let Some(entry) = self.globals.iter().find(|entry| entry.name == name) {
             return Ok(Some(entry.offset));
         }
+        if let Some(entry) = self.shared_globals.iter().find(|entry| entry.name == name) {
+            return Ok(Some(entry.offset));
+        }
 
         if matches!(self.block, BlockKind::Function) {
             let at = self
@@ -779,6 +838,29 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         }
         let name = to_name(token)?;
         if let Some(entry) = self.stack_slots.iter().find(|entry| entry.name == name) {
+            return Ok(Some(entry.offset));
+        }
+        self.resolve_operand(token)
+    }
+
+    fn resolve_global_operand(&mut self, token: &str) -> Result<Option<Word>, AssemblerError> {
+        if let Ok(value) = parse_word(token) {
+            if value >= self.globals_size {
+                return Err(AssemblerError::Kind(
+                    AssemblerErrorKind::GlobalIndexOutOfRange,
+                ));
+            }
+            let offset = self
+                .globals_base
+                .checked_add(value)
+                .ok_or(AssemblerError::Kind(AssemblerErrorKind::GlobalIndexOutOfRange))?;
+            return Ok(Some(offset));
+        }
+        let name = to_name(token)?;
+        if let Some(entry) = self.globals.iter().find(|entry| entry.name == name) {
+            return Ok(Some(entry.offset));
+        }
+        if let Some(entry) = self.shared_globals.iter().find(|entry| entry.name == name) {
             return Ok(Some(entry.offset));
         }
         self.resolve_operand(token)

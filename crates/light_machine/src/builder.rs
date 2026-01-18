@@ -41,6 +41,7 @@ pub struct ProgramBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COU
     next_machine_builder: Word,
     free: Word,
     descriptor: ProgramDescriptor<MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
+    shared_globals_size: Word,
 }
 
 impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
@@ -76,7 +77,22 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             free,
             next_machine_builder: 0,
             descriptor: ProgramDescriptor::new(),
+            shared_globals_size: 0,
         })
+    }
+
+    pub fn set_shared_globals_size(&mut self, shared_globals_size: Word) -> Result<(), MachineBuilderError> {
+        if self.next_machine_builder != 0 {
+            return Err(MachineBuilderError::MachineCountExceeded);
+        }
+        set_value(
+            self.buffer,
+            GLOBALS_SIZE_OFFSET,
+            shared_globals_size,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        self.shared_globals_size = shared_globals_size;
+        Ok(())
     }
 
     pub fn new_machine(
@@ -111,7 +127,14 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             .buffer
             .get(GLOBALS_SIZE_OFFSET)
             .ok_or(MachineBuilderError::BufferTooSmall)?;
-        MachineBuilder::new(self, function_count, globals_size, globals_offset)
+        let shared_globals_size = self.shared_globals_size;
+        MachineBuilder::new(
+            self,
+            function_count,
+            globals_size,
+            globals_offset,
+            shared_globals_size,
+        )
     }
 
     fn allocate(&mut self, word_count: Word) -> Result<(), MachineBuilderError> {
@@ -182,6 +205,8 @@ pub struct MachineBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COU
     function_count: Word,
     next_function_number: Word,
     globals_size: Word,
+    globals_offset: Word,
+    shared_globals_size: Word,
     discriptor: MachineDescriptor<FUNCTION_COUNT_MAX>,
 }
 
@@ -205,6 +230,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         function_count: Word,
         globals_size: Word,
         globals_offset: Word,
+        shared_globals_size: Word,
     ) -> Result<Self, MachineBuilderError> {
         let machine_start = program.free;
         program.add_word(globals_size)?;
@@ -216,6 +242,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             function_count,
             next_function_number: 0,
             globals_size,
+            globals_offset,
+            shared_globals_size,
             discriptor: MachineDescriptor::new(),
         })
     }
@@ -269,6 +297,23 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     pub fn finish(mut self) -> Result<ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError> {
         self.program.finish_machine(self.globals_size, self.discriptor)?;
         Ok(self.program)
+    }
+
+    pub fn globals_offset(&self) -> Word {
+        self.globals_offset
+    }
+
+    fn validate_global_address(&self, address: Word) -> Result<(), MachineBuilderError> {
+        if address < self.shared_globals_size {
+            return Ok(());
+        }
+        let Some(end) = self.globals_offset.checked_add(self.globals_size) else {
+            return Err(MachineBuilderError::GlobalOutOfRange(address));
+        };
+        if address < self.globals_offset || address >= end {
+            return Err(MachineBuilderError::GlobalOutOfRange(address));
+        }
+        Ok(())
     }
 
     fn add_word(&mut self, word: Word) -> Result<(), MachineBuilderError> {
@@ -373,16 +418,12 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
                 self.machine.add_word(Ops::Pop.into())?;
             }
             Op::Load(address) => {
-                if address >= self.machine.globals_size {
-                    return Err(MachineBuilderError::GlobalOutOfRange(address));
-                }
+                self.machine.validate_global_address(address)?;
                 self.machine.add_word(Ops::Load.into())?;
                 self.machine.add_word(address)?;
             }
             Op::Store(address) => {
-                if address >= self.machine.globals_size {
-                    return Err(MachineBuilderError::GlobalOutOfRange(address));
-                }
+                self.machine.validate_global_address(address)?;
                 self.machine.add_word(Ops::Store.into())?;
                 self.machine.add_word(address)?;
             }

@@ -7,7 +7,7 @@ fn assembles_basic_program() {
     let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1).unwrap();
     let mut asm: Assembler<1, 2, 16, 16> = Assembler::new(builder);
 
-    asm.add_line(".machine main globals 3 functions 2").unwrap();
+    asm.add_line(".machine main locals 3 functions 2").unwrap();
     asm.add_line(".func set_rgb index 0").unwrap();
     asm.add_line("STORE 0").unwrap();
     asm.add_line("STORE 1").unwrap();
@@ -33,7 +33,7 @@ fn supports_forward_function_declaration() {
     let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1).unwrap();
     let mut asm: Assembler<1, 2, 16, 16> = Assembler::new(builder);
 
-    asm.add_line(".machine main globals 1 functions 2").unwrap();
+    asm.add_line(".machine main locals 1 functions 2").unwrap();
     asm.add_line(".func_decl later index 1").unwrap();
     asm.add_line(".func first index 0").unwrap();
     asm.add_line("EXIT").unwrap();
@@ -53,7 +53,7 @@ fn reports_line_numbers_on_error() {
     let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1).unwrap();
     let mut asm: Assembler<1, 1, 8, 8> = Assembler::new(builder);
 
-    asm.add_line(".machine main globals 1 functions 1").unwrap();
+    asm.add_line(".machine main locals 1 functions 1").unwrap();
     asm.add_line(".func test index 0").unwrap();
     let err = asm.add_line("BADOP").unwrap_err();
     match err {
@@ -71,9 +71,9 @@ fn supports_named_globals() {
     let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
 
-    asm.add_line(".machine main globals 2 functions 1").unwrap();
-    asm.add_line(".global red 0").unwrap();
-    asm.add_line(".global green 1").unwrap();
+    asm.add_line(".machine main locals 2 functions 1").unwrap();
+    asm.add_line(".local red 0").unwrap();
+    asm.add_line(".local green 1").unwrap();
     asm.add_line(".func set index 0").unwrap();
     asm.add_line("STORE red").unwrap();
     asm.add_line("STORE green").unwrap();
@@ -88,12 +88,30 @@ fn supports_named_globals() {
 }
 
 #[test]
+fn supports_shared_globals() {
+    let mut buffer = [0u16; 128];
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1).unwrap();
+    let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
+
+    asm.add_line(".shared brightness 0").unwrap();
+    asm.add_line(".machine main locals 1 functions 1").unwrap();
+    asm.add_line(".func main index 0").unwrap();
+    asm.add_line("LOAD brightness").unwrap();
+    asm.add_line("EXIT").unwrap();
+    asm.add_line(".end").unwrap();
+    asm.add_line(".end").unwrap();
+
+    let descriptor = asm.finish().unwrap();
+    assert_eq!(descriptor.machines.len(), 1);
+}
+
+#[test]
 fn supports_named_stack_slots() {
     let mut buffer = [0u16; 128];
     let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
 
-    asm.add_line(".machine main globals 0 functions 1").unwrap();
+    asm.add_line(".machine main locals 0 functions 1").unwrap();
     asm.add_line(".func main index 0").unwrap();
     asm.add_line(".frame first 0").unwrap();
     asm.add_line(".frame second 1").unwrap();
