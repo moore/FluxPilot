@@ -58,26 +58,31 @@
 
         <div class="rack-scrim" id="rack-scrim" aria-hidden="true"></div>
         <fd-machine-rack class="panel secondary machine-rack" aria-hidden="true">
-          <div class="panel-header">
+          <div class="panel-header rack-header">
             <h2>Machine Rack</h2>
-            <button class="button rack-close" id="close-rack" type="button">Done</button>
+            <button class="button rack-close" data-close-rack type="button">Done</button>
           </div>
-           <fd-machine-card
-            title="Simple Crawl"
-            description="Color crawls across the LEDs."
-            data-machine-id="SimpleCrawlerMachine"
-          ></fd-machine-card>
-          <fd-machine-card
-            title="Pulse"
-            description="All LEDs display the same color with a slow pulse"
-            data-machine-id="FixedColorMachine"
-            data-machine-source="editor"
-          ></fd-machine-card>
-          <fd-machine-card
-            title="Crawl"
-            description="Color crawls across the LEDs."
-            data-machine-id="CrawlerMachine"
-          ></fd-machine-card>
+          <div class="machine-grid stagger">
+            <fd-machine-card
+              title="Simple Crawl"
+              description="Color crawls across the LEDs."
+              data-machine-id="SimpleCrawlerMachine"
+            ></fd-machine-card>
+            <fd-machine-card
+              title="Pulse"
+              description="All LEDs display the same color with a slow pulse"
+              data-machine-id="FixedColorMachine"
+              data-machine-source="editor"
+            ></fd-machine-card>
+            <fd-machine-card
+              title="Crawl"
+              description="Color crawls across the LEDs."
+              data-machine-id="CrawlerMachine"
+            ></fd-machine-card>
+          </div>
+          <div class="rack-footer">
+            <button class="button rack-close" data-close-rack type="button">Done</button>
+          </div>
         </fd-machine-rack>
       </main>
 

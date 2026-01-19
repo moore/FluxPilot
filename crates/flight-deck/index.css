@@ -40,10 +40,12 @@ body {
   justify-content: center;
   align-items: flex-start;
   padding: 28px;
+  overflow-y: scroll;
 }
 
 .shell {
   width: min(1280px, 100%);
+  min-height: 80vh;
   display: grid;
   grid-template-rows: auto auto auto;
   gap: var(--gap-lg);
@@ -554,11 +556,44 @@ fd-track {
   position: absolute;
   inset: 0;
   overflow: auto;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: var(--gap-md);
+  padding: 20px;
   transform: translateX(100%);
   opacity: 0;
   pointer-events: none;
   transition: transform 0.35s ease, opacity 0.35s ease;
   z-index: 2;
+}
+
+.rack-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 8px 4px 12px;
+  margin: -8px -4px 0;
+  background: linear-gradient(160deg, rgba(212, 184, 232, 0.96), rgba(228, 204, 240, 0.96));
+  border-bottom: 1px solid rgba(126, 90, 158, 0.35);
+}
+
+.machine-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  align-content: start;
+}
+
+.rack-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 4px 4px;
+  margin: 0 -4px -4px;
+  background: linear-gradient(160deg, rgba(212, 184, 232, 0.96), rgba(228, 204, 240, 0.96));
+  border-top: 1px solid rgba(126, 90, 158, 0.35);
 }
 
 .rack-scrim {
@@ -628,13 +663,13 @@ fd-track {
 }
 
 .machine-card {
-  padding: 16px;
+  padding: 12px;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(126, 90, 158, 0.42);
   background: linear-gradient(160deg, rgba(216, 190, 232, 0.86), rgba(232, 208, 240, 0.86)),
     repeating-linear-gradient(135deg, rgba(240, 220, 248, 0.22) 0px, rgba(240, 220, 248, 0.22) 12px, rgba(202, 174, 222, 0.16) 12px, rgba(202, 174, 222, 0.16) 24px);
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .machine-card[draggable="true"] {
@@ -651,12 +686,12 @@ fd-track {
   border: 2px solid rgba(122, 90, 158, 0.6);
   background: rgba(228, 200, 240, 0.9);
   color: #3a2250;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: 999px;
   font-family: var(--font-display);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
   transition: transform 0.2s ease, border-color 0.2s ease;
 }
@@ -669,12 +704,13 @@ fd-track {
 .machine-card h3 {
   margin: 0 0 8px 0;
   font-family: var(--font-display);
+  font-size: 14px;
 }
 
 .machine-card p {
   margin: 0;
   color: var(--ink-1);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 footer {

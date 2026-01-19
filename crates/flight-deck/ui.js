@@ -1267,7 +1267,7 @@ export async function runUi() {
   const trackList = document.getElementById("track-list");
   const machineCards = document.querySelectorAll("fd-machine-card");
   const addTrackBtn = document.getElementById("add-track");
-  const closeRackBtn = document.getElementById("close-rack");
+  const closeRackButtons = document.querySelectorAll("[data-close-rack]");
   const rackScrim = document.getElementById("rack-scrim");
   const shell = document.querySelector("fd-app");
   const rackPanel = document.querySelector(".machine-rack");
@@ -1407,7 +1407,9 @@ export async function runUi() {
   };
 
   addTrackBtn?.addEventListener("click", openRack);
-  closeRackBtn?.addEventListener("click", closeRack);
+  closeRackButtons.forEach((button) => {
+    button.addEventListener("click", closeRack);
+  });
   rackScrim?.addEventListener("click", closeRack);
 
   await initDeck();
