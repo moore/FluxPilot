@@ -43,7 +43,6 @@ Notes:
 - `.data` blocks can appear anywhere inside a machine and can be referenced by
   labels when `LOAD_STATIC` is implemented.
 - `.shared` must be declared before any `.machine`.
-- `.global` is accepted as a deprecated alias for `.local`.
 - `.machine` accepts `globals` as a deprecated alias for `locals`.
 - `LOAD`/`STORE` numeric operands are treated as local indices; use `.shared` labels for shared state.
 - Labels are allowed in functions and data blocks.

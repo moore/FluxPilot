@@ -249,7 +249,6 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ".machine" => self.start_machine(tokens),
             ".func" => self.start_function(tokens),
             ".func_decl" => self.declare_function(tokens),
-            ".global" => self.declare_local(tokens),
             ".local" => self.declare_local(tokens),
             ".shared" => self.declare_shared(tokens),
             ".frame" => self.declare_stack_slot(tokens),
