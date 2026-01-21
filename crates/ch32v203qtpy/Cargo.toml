@@ -63,6 +63,7 @@ embassy-sync = "0.7.0"
 postcard = { workspace = true }
 pliot = { path = "../pliot" }
 static_cell = "2.1.1"
+fluxpilot-firmware = { path = "../fluxpilot-firmware" }
 
 
 [features]

@@ -30,12 +30,10 @@ use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Timer, Instant, Duration};
-use embassy_usb::driver::EndpointError;
 use embassy_usb::Builder;
 
 use ch32_hal::bind_interrupts;
 use ch32_hal::usbd::Driver;
-use ch32_hal::usbd::Instance;
 
 use {ch32_hal as hal, panic_halt as _};
 
@@ -43,13 +41,13 @@ use crate::ws2812::Ws2812;
 use smart_leds::{SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
 
-mod vendor_class;
-use crate::vendor_class::{VendorClass, VendorReceiver, VendorSender};
+use fluxpilot_firmware::program::default_program;
+use fluxpilot_firmware::usb_io::{io_loop, PliotShared};
+use fluxpilot_firmware::usb_vendor::{VendorClass, VendorReceiver, VendorSender};
 
 #[cfg(feature = "storage-flash")]
 mod flash_storage;
 
-use light_machine::builder::{MachineBuilderError, Op, ProgramBuilder};
 use light_machine::Word;
 use pliot::Pliot;
 #[cfg(feature = "storage-mem")]
@@ -73,6 +71,7 @@ const NUM_LEDS: usize = 25;
 const FRAME_TARGET: u64 = 16;
 const PROGRAM_BUFFER_SIZE: usize = 1024;
 const USB_RECEIVE_BUF_SIZE: usize = 265; // BUG: I don't know the correct size
+const STACK_SIZE: usize = 100;
 #[cfg(all(feature = "storage-mem", feature = "storage-flash"))]
 compile_error!("Enable only one of `storage-mem` or `storage-flash` features.");
 #[cfg(not(any(feature = "storage-mem", feature = "storage-flash")))]
@@ -90,17 +89,15 @@ static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
 static USB_BOS_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
 static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
-static PLIOT_SHARED: StaticCell<Mutex<CriticalSectionRawMutex, PliotShared>> = StaticCell::new();
+static PLIOT_SHARED: StaticCell<Mutex<CriticalSectionRawMutex, SharedState>> = StaticCell::new();
 
 #[cfg(feature = "storage-mem")]
 type StorageImpl = MemStorage<'static>;
 #[cfg(feature = "storage-flash")]
 type StorageImpl = FlashStorage;
 
-struct PliotShared {
-    pliot: Pliot<'static, 'static, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, StorageImpl>,
-    stack: Vec<Word, 100>,
-}
+type SharedState =
+    PliotShared<'static, 'static, StorageImpl, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, STACK_SIZE>;
 
 static mut DEBUG_WS: *mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>> =
     core::ptr::null_mut();
@@ -209,7 +206,7 @@ async fn main(spawner: Spawner) -> () {
     #[cfg(feature = "storage-mem")]
     let storage = {
         let program_buffer = PROGRAM_BUFFER.init([0u16; PROGRAM_BUFFER_SIZE]);
-        if get_program(program_buffer).is_err() {
+        if default_program(program_buffer).is_err() {
             // BUG: we should log here.
             return;
         }
@@ -246,7 +243,7 @@ async fn main(spawner: Spawner) -> () {
         };
         if storage.is_empty() {
             let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
-            let program_len = match get_program(program_buffer) {
+            let program_len = match default_program(program_buffer) {
                 Ok(length) => length,
                 Err(_) => {
                     // BUG: we should log here.
@@ -307,19 +304,33 @@ async fn usb_device_task(
 async fn io_task(
     mut receiver: VendorReceiver<'static, Driver<'static, peripherals::USBD>>,
     mut sender: VendorSender<'static, Driver<'static, peripherals::USBD>>,
-    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
+    shared: &'static Mutex<CriticalSectionRawMutex, SharedState>,
 ) {
+    let usb_buf = USB_RECEIVE_BUF.init([0u8; USB_RECEIVE_BUF_SIZE]);
+    let frame = RAW_MESSAGE_BUFF.init(Vec::new());
     loop {
         receiver.wait_connection().await;
         sender.wait_connection().await;
-        let _ = io_loop(&mut receiver, &mut sender, shared).await;
+        frame.clear();
+        let _ = io_loop::<
+            _,
+            _,
+            MAX_ARGS,
+            MAX_RESULT,
+            PROGRAM_BLOCK_SIZE,
+            STACK_SIZE,
+            USB_RECEIVE_BUF_SIZE,
+            INCOMING_MESSAGE_CAP,
+            OUTGOING_MESSAGE_CAP,
+        >(&mut receiver, &mut sender, shared, usb_buf, frame)
+        .await;
     }
 }
 
 async fn led_task(
     ws: &mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>>,
     data: &mut [RGB8; NUM_LEDS],
-    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
+    shared: &'static Mutex<CriticalSectionRawMutex, SharedState>,
 ) {
     let mut tick = 0u16;
     loop {
@@ -335,7 +346,7 @@ async fn led_task(
                     return
                 },
             };
-            let seed_stack = |stack: &mut Vec<Word, 100>, red: u8, green: u8, blue: u8| -> bool {
+            let seed_stack = |stack: &mut Vec<Word, STACK_SIZE>, red: u8, green: u8, blue: u8| -> bool {
                 stack.clear();
                 if stack.push(red as Word).is_err() {
                     return false;
@@ -387,114 +398,5 @@ async fn led_task(
 
         Timer::after(wait_duration).await;
         tick = tick.wrapping_add(1);
-    }
-}
-
-
-#[link_section = ".coldtext"]
-#[inline(never)]
-fn get_program(buffer: &mut [u16]) -> Result<usize, MachineBuilderError> {
-    const MACHINE_COUNT: usize = 1;
-    const FUNCTION_COUNT: usize = 3;
-    let program_builder =
-        ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(buffer, MACHINE_COUNT as u16)?;
-
-    let globals_size = 3;
-    let machine = program_builder.new_machine(FUNCTION_COUNT as u16, globals_size)?;
-    let mut function = machine.new_function()?;
-    function.add_op(Op::Push(0))?;
-    function.add_op(Op::Store(0))?;
-    function.add_op(Op::Push(16))?;
-    function.add_op(Op::Store(1))?;
-    function.add_op(Op::Push(8))?;
-    function.add_op(Op::Store(2))?;
-    function.add_op(Op::Exit)?;
-    let (_function_index, machine) = function.finish()?;
-
-    let mut function = machine.new_function()?;
-    function.add_op(Op::Load(0))?;
-    function.add_op(Op::Load(1))?;
-    function.add_op(Op::Load(2))?;
-    function.add_op(Op::Exit)?;
-    let (_function_index, machine) = function.finish()?;
-
-     let mut function = machine.new_function()?;
-    function.add_op(Op::Store(0))?;
-    function.add_op(Op::Store(1))?;
-    function.add_op(Op::Store(2))?;
-    function.add_op(Op::Exit)?;
-    let (_function_index, machine) = function.finish()?;
-
-    let program_builder = machine.finish()?;
-    let descriptor = program_builder.finish_program();
-
-    Ok(descriptor.length)
-}
-
-struct Disconnected {}
-
-impl From<EndpointError> for Disconnected {
-    fn from(val: EndpointError) -> Self {
-        match val {
-            EndpointError::BufferOverflow => Disconnected {},
-            EndpointError::Disabled => Disconnected {},
-        }
-    }
-}
-
-async fn io_loop<'d, T: Instance + 'd>(
-    receiver: &mut VendorReceiver<'d, Driver<'d, T>>,
-    sender: &mut VendorSender<'d, Driver<'d, T>>,
-    shared: &'static Mutex<CriticalSectionRawMutex, PliotShared>,
-) -> Result<(), Disconnected> {
-    let buf = USB_RECEIVE_BUF.init([0u8; USB_RECEIVE_BUF_SIZE]);
-    let frame = RAW_MESSAGE_BUFF.init(Vec::new());
-    loop {
-        let n = receiver.read_packet(buf).await?;
-        let Some(data) = buf.get(..n) else {
-            // This should be unreachable but we should probbly
-            // log something.
-            continue;  
-        };
-        for &byte in data {
-            if frame.push(byte).is_err() {
-                // TODO: Track overflow and discard bytes until the next 0 delimiter to avoid decoding a partial frame.
-                // TODO: Send an error response so the sender knows the frame exceeded the size limit.
-                frame.clear();
-                continue;
-            }
-
-            if byte == 0 {
-                let mut out_buf = [0u8; OUTGOING_MESSAGE_CAP];
-                let wrote = {
-                    let mut guard = shared.lock().await;
-                    let PliotShared { pliot, stack } = &mut *guard;
-                    let result = pliot.process_message(
-                        stack,
-                        frame.as_mut_slice(),
-                        out_buf.as_mut_slice(),
-                    );
-
-                    match result {
-                        Ok(wrote) => wrote,
-                        Err(_) => {
-                            // BUG: we should log error
-                            stack.clear();
-                            0
-                        }
-                    }
-                };
-                frame.clear();
-
-                if wrote > 0 {
-                    if let Some(bytes) = out_buf.get(..wrote) {
-                        sender.write_packet(bytes).await?;
-                    } else {
-                        //BUG: this should be unreachable but we should log
-                        // to catch bugs introduced in refactoring.
-                    }
-                }
-            }
-        }
     }
 }

@@ -1,0 +1,11 @@
+[package]
+name = "fluxpilot-firmware"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+embassy-usb = { version = "0.5.1" }
+embassy-sync = "0.7.0"
+heapless = { workspace = true }
+light_machine = { path = "../light_machine" }
+pliot = { path = "../pliot" }

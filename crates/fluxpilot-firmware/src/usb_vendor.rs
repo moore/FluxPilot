@@ -1,6 +1,5 @@
-use embassy_usb::driver::{Driver, EndpointError};
+use embassy_usb::driver::{Driver, Endpoint, EndpointIn, EndpointOut};
 use embassy_usb::Builder;
-use embassy_usb::driver::{Endpoint, EndpointIn, EndpointOut};
 
 const USB_CLASS_VENDOR: u8 = 0xff;
 const USB_SUBCLASS_NONE: u8 = 0x00;
@@ -51,10 +50,9 @@ impl<'d, D: Driver<'d>> VendorReceiver<'d, D> {
         self.read_ep.wait_enabled().await;
     }
 
-    pub async fn read_packet(&mut self, data: &mut [u8]) -> Result<usize, EndpointError> {
+    pub async fn read_packet(&mut self, data: &mut [u8]) -> Result<usize, embassy_usb::driver::EndpointError> {
         let mut n = 0;
         loop {
-            // BUG: This whole function is kinda wack
             let Some(buf) = data.get_mut(n..) else {
                 return Ok(n);
             };
@@ -77,7 +75,7 @@ impl<'d, D: Driver<'d>> VendorSender<'d, D> {
         self.write_ep.wait_enabled().await;
     }
 
-    pub async fn write_packet(&mut self, data: &[u8]) -> Result<(), EndpointError> {
+    pub async fn write_packet(&mut self, data: &[u8]) -> Result<(), embassy_usb::driver::EndpointError> {
         for chunk in data.chunks(self.max_packet_size as usize) {
             self.write_ep.write(chunk).await?;
         }
