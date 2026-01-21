@@ -12,7 +12,8 @@ bench = false
 
 [dependencies]
 #ch32-hal = {  git = "https://github.com/ch32-rs/ch32-hal.git", branch = "usbd-example", features = [
-ch32-hal = {  git = "https://github.com/moore/ch32-hal.git", features = [
+#ch32-hal = {  git = "https://github.com/moore/ch32-hal.git", features = [
+ch32-hal = {  git = "https://github.com/ch32-rs/ch32-hal.git", features = [
     "ch32v203g8r6",
     "memory-x",
     "embassy",
