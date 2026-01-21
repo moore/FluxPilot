@@ -298,26 +298,6 @@ function applyGlobalBrightness(value) {
 
 export async function connect() {
     setStatus('Connecting...');
-    // Try Web Serial first, fallback to WebUSB if not available
-    if (false && 'serial' in navigator) {
-        try {
-            const port = await navigator.serial.requestPort({ filters: [] });
-            await port.open({ baudRate: 9600 });
-            writer = { port: port.writable.getWriter(), type: 'serial' };
-            enableControls();
-            setConnectionState(true);
-            setStatus('Connected via Web USB.');
-            port.addEventListener?.('disconnect', () => {
-                handleDisconnect('Device disconnected.');
-            });
-            return;
-        } catch (err) {
-            console.error('Web Serial Connect error:', err);
-            setStatus('Web Serial failed, trying WebUSB...');
-        }
-    }
-    
-    // Fallback to WebUSB
     if (!('usb' in navigator)) {
         setStatus('WebUSB not available in this browser.');
         return;
@@ -426,9 +406,7 @@ export async function autoConnect() {
 async function sendMessage(message) {
     if (!writer) { setStatus('Device not connected.'); return; }
     try {
-        if (writer.type === 'serial') {
-            await writer.port.write(message);
-        } else if (writer.type === 'usb') {
+        if (writer.type === 'usb') {
             await writer.device.transferOut(writer.outEndpoint, message);
         }
         setStatus(`Sent ${message.length} bytes`);
@@ -554,11 +532,11 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
     });
 
     // Initial check
-    if (!('serial' in navigator) && !('usb' in navigator)) {
+    if (!('usb' in navigator)) {
         if (connectBtn) {
             connectBtn.disabled = true;
         }
-        setStatus('Neither Web Serial nor WebUSB available.');
+        setStatus('WebUSB not available in this browser.');
     }
 
     if ('usb' in navigator) {
