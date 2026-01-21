@@ -29,7 +29,6 @@ use hal::spi::Spi;
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-use embassy_time::{Timer, Instant, Duration};
 use embassy_usb::Builder;
 
 use ch32_hal::bind_interrupts;
@@ -41,6 +40,7 @@ use crate::ws2812::Ws2812;
 use smart_leds::{SmartLedsWrite, RGB8};
 use ws2812_spi as ws2812;
 
+use fluxpilot_firmware::led::led_loop;
 use fluxpilot_firmware::program::default_program;
 use fluxpilot_firmware::usb_io::{io_loop, PliotShared};
 use fluxpilot_firmware::usb_vendor::{VendorClass, VendorReceiver, VendorSender};
@@ -48,7 +48,6 @@ use fluxpilot_firmware::usb_vendor::{VendorClass, VendorReceiver, VendorSender};
 #[cfg(feature = "storage-flash")]
 mod flash_storage;
 
-use light_machine::Word;
 use pliot::Pliot;
 #[cfg(feature = "storage-mem")]
 use pliot::meme_storage::MemStorage;
@@ -286,11 +285,17 @@ async fn main(spawner: Spawner) -> () {
     let _ = spawner.spawn(io_task(usb_receiver, usb_sender, shared));
     // Boot step 2: USB tasks spawned.
     debug_led_clear();
-    led_task(
-            &mut ws,
-            data,
-            shared,
-        ).await;
+    led_loop::<
+        _,
+        _,
+        MAX_ARGS,
+        MAX_RESULT,
+        PROGRAM_BLOCK_SIZE,
+        STACK_SIZE,
+        NUM_LEDS,
+        FRAME_TARGET,
+    >(&mut ws, data, shared)
+    .await;
 }
 
 #[embassy_executor::task]
@@ -324,79 +329,5 @@ async fn io_task(
             OUTGOING_MESSAGE_CAP,
         >(&mut receiver, &mut sender, shared, usb_buf, frame)
         .await;
-    }
-}
-
-async fn led_task(
-    ws: &mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>>,
-    data: &mut [RGB8; NUM_LEDS],
-    shared: &'static Mutex<CriticalSectionRawMutex, SharedState>,
-) {
-    let mut tick = 0u16;
-    loop {
-        
-        let start_time = Instant::now();
-        {
-            let mut guard = shared.lock().await;
-            let PliotShared { pliot, stack } = &mut *guard;
-            let machine_count = match pliot.machine_count() {
-                Ok(count) => count,
-                Err(_) => {
-                    // BUG: Log
-                    return
-                },
-            };
-            let seed_stack = |stack: &mut Vec<Word, STACK_SIZE>, red: u8, green: u8, blue: u8| -> bool {
-                stack.clear();
-                if stack.push(red as Word).is_err() {
-                    return false;
-                }
-                if stack.push(green as Word).is_err() {
-                    stack.clear();
-                    return false;
-                }
-                if stack.push(blue as Word).is_err() {
-                    stack.clear();
-                    return false;
-                }
-                true
-            };
-            for (i, led) in data.iter_mut().enumerate() {
-                let mut red = 0u8;
-                let mut green = 0u8;
-                let mut blue = 0u8;
-                if !seed_stack(stack, red, green, blue) {
-                    continue;
-                }
-                for machine_number in 0..machine_count {
-                    match pliot.get_led_color(machine_number, i as u16, tick, stack) {
-                        Ok((next_red, next_green, next_blue)) => {
-                            red = next_red;
-                            green = next_green;
-                            blue = next_blue;
-                            if !seed_stack(stack, red, green, blue) {
-                                break;
-                            }
-                        }
-                        Err(_) => {
-                            stack.clear();
-                            break;
-                        }
-                    }
-                }
-                *led = (red, green, blue).into();
-            }
-        }
-
-
-        let _ = ws.write(data.clone());
-        
-        let wait_duration = match Duration::from_millis(FRAME_TARGET).checked_sub(start_time.elapsed()) {
-            Some(d) => d,
-            None => Duration::from_millis(0),
-        };
-
-        Timer::after(wait_duration).await;
-        tick = tick.wrapping_add(1);
     }
 }
