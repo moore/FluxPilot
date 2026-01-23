@@ -211,12 +211,13 @@ export const CRAWLER_MACHINE = `
 `;
 
 export const SIMPLE_CRAWLER_MACHINE = `
-.machine main locals 5 functions 6
+.machine main locals 6 functions 7
     .local red 0
     .local green 1
     .local blue 2
     .local speed 3
     .local brightness 4
+    .local led_count 5
 
     .func init index 0
       PUSH 0
@@ -229,6 +230,8 @@ export const SIMPLE_CRAWLER_MACHINE = `
       STORE speed
       PUSH 10
       STORE brightness
+      PUSH 25
+      STORE led_count
       EXIT
     .end
 
@@ -249,6 +252,11 @@ export const SIMPLE_CRAWLER_MACHINE = `
       EXIT
     .end
 
+    .func set_led_count index 6
+      STORE led_count
+      EXIT
+    .end
+
     .func get_rgb_worker index 5
       .frame sred 0
       .frame sgreen 1
@@ -258,9 +266,9 @@ export const SIMPLE_CRAWLER_MACHINE = `
       SLOAD led_index
       SLOAD ticks
       LOAD speed
-      MOD ; count up 1 second
+      MOD ; count up speed ms
       LOAD speed
-      push 25
+      LOAD led_count
       DIV
       DIV
       BREQ match
@@ -404,6 +412,16 @@ export const DEFAULT_MACHINE_RACK = [
         max: 100,
         step: 1,
         defaultValue: 30,
+      }),
+      new MachineControlDescriptor({
+        id: "ledcount",
+        label: "Led Count",
+        functionId: 6,
+        type: "range",
+        min: 1,
+        max: 1024,
+        step: 1,
+        defaultValue: 25,
       }),
       new MachineControlDescriptor({
         id: "rainbow",
