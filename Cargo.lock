@@ -479,7 +479,7 @@ name = "fluxpilot-firmware"
 version = "0.1.0"
 dependencies = [
  "embassy-sync",
- "embassy-time 0.4.0",
+ "embassy-time 0.5.0",
  "embassy-usb",
  "heapless 0.9.2",
  "light_machine",
@@ -789,13 +789,6 @@ name = "pkg-config"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
-
-[[package]]
-name = "plasma2350"
-version = "0.1.0"
-dependencies = [
- "fluxpilot-firmware",
-]
 
 [[package]]
 name = "pliot"
