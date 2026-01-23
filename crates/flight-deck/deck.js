@@ -319,6 +319,7 @@ export async function connect() {
             { vendorId: 0x2341 }, // Arduino
             { vendorId: 0x239A }, // Adafruit
             { vendorId: 0x1209 }, // Generic
+            { vendorId: 0x2E8A }, // Rpi RP2035
         ];
         
         const device = await navigator.usb.requestDevice({ filters });
