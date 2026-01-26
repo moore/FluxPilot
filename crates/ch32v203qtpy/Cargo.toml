@@ -59,6 +59,7 @@ micromath = { version = "2.1.0", features = ["num-traits"] }
 smart-leds = "0.4.0"
 ws2812-spi = "0.5.0"
 thiserror-no-std = {workspace = true}
+embedded-storage = { workspace = true }
 light_machine = {path = "../light_machine"}
 embassy-sync = "0.7.0"
 postcard = { workspace = true }

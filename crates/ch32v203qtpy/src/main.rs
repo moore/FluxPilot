@@ -46,13 +46,15 @@ use fluxpilot_firmware::usb_io::{io_loop, PliotShared};
 use fluxpilot_firmware::usb_vendor::{VendorClass, VendorReceiver, VendorSender};
 
 #[cfg(feature = "storage-flash")]
-mod flash_storage;
+mod ch32_flash;
 
 use pliot::Pliot;
 #[cfg(feature = "storage-mem")]
 use pliot::meme_storage::MemStorage;
 #[cfg(feature = "storage-flash")]
-use crate::flash_storage::FlashStorage;
+use crate::ch32_flash::Ch32Flash;
+#[cfg(feature = "storage-flash")]
+use fluxpilot_firmware::flash_storage::FlashStorage;
 
 use heapless::Vec;
 use static_cell::StaticCell;
@@ -71,6 +73,8 @@ const FRAME_TARGET: u64 = 16;
 const PROGRAM_BUFFER_SIZE: usize = 1024;
 const USB_RECEIVE_BUF_SIZE: usize = 265; // BUG: I don't know the correct size
 const STACK_SIZE: usize = 100;
+#[cfg(feature = "storage-flash")]
+const FLASH_BASE: usize = 0x0000_0000;
 #[cfg(all(feature = "storage-mem", feature = "storage-flash"))]
 compile_error!("Enable only one of `storage-mem` or `storage-flash` features.");
 #[cfg(not(any(feature = "storage-mem", feature = "storage-flash")))]
@@ -215,31 +219,36 @@ async fn main(spawner: Spawner) -> () {
     let storage = {
         use pliot::StorageError;
 
-        let mut storage = match FlashStorage::open() {
+        let flash_size = hal::signature::flash_size_kb() as usize * 1024;
+        let mut storage = match FlashStorage::new(Ch32Flash::new(FLASH_BASE, flash_size), FLASH_BASE)
+        {
             Ok(storage) => storage,
-            Err(e) =>  match e {   
-                StorageError::InvalidHeader => {
-                    if FlashStorage::probe_write_read().is_err() {
-                        // BUG: we should log here.
-                        return;
-                    }
-                    if FlashStorage::format().is_err() {
-                        // BUG: we should log here.
-                        return;
-                    }
-                    let Ok(storage) = FlashStorage::open() else  {
-                         // BUG: we should log here.
-                        return;
-                    };
-
-                    storage
+            Err(_) => {
+                // BUG: we should log here.
+                return;
+            }
+        };
+        match storage.load_header() {
+            Ok(()) => {}
+            Err(StorageError::InvalidHeader) => {
+                if storage.probe_write_read().is_err() {
+                    // BUG: we should log here.
+                    return;
                 }
-                _ => {
+                if storage.format().is_err() {
+                    // BUG: we should log here.
+                    return;
+                }
+                if storage.load_header().is_err() {
                     // BUG: we should log here.
                     return;
                 }
             }
-        };
+            Err(_) => {
+                // BUG: we should log here.
+                return;
+            }
+        }
         if storage.is_empty() {
             let program_buffer = PROGRAM_BUFFER.init([0u16; 100]);
             let program_len = match default_program(program_buffer) {

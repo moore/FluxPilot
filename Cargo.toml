@@ -22,6 +22,9 @@ version = "1.0.228"
 features = ["serde_derive"]
 default-features = false
 
+[workspace.dependencies.embedded-storage]
+version = "0.3.1"
+
 [profile.release]
 opt-level = "s"
 #lto = true
