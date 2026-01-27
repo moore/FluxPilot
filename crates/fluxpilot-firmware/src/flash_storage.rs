@@ -4,10 +4,10 @@ use light_machine::{Program, Word};
 use pliot::{ProgramNumber, Storage, StorageError};
 
 const WORD_SIZE_BYTES: usize = 2;
-// Header layout: magic, version, start offset (words), program length (words), header crc32.
+// Header layout: magic, version, program length (words), header crc32.
 const HEADER_MAGIC: u32 = u32::from_le_bytes(*b"PLIO");
 const HEADER_VERSION: u32 = 1;
-const HEADER_SIZE_BYTES: usize = 20;
+const HEADER_SIZE_BYTES: usize = 16;
 const HEADER_WORDS: usize = HEADER_SIZE_BYTES / WORD_SIZE_BYTES;
 
 extern "C" {
@@ -178,63 +178,23 @@ impl<F: NorFlash> FlashStorage<F> {
     }
 
     fn read_header(&mut self) -> Result<StorageHeader, StorageError> {
-        let storage_len = self
-            .storage_end
-            .checked_sub(self.storage_start)
-            .ok_or(StorageError::InvalidHeader)?;
-        if storage_len < HEADER_SIZE_BYTES {
-            return Err(StorageError::InvalidHeader);
-        }
+        self.check_header_len()?;
         let mut bytes = [0u8; HEADER_SIZE_BYTES];
         self.flash
             .read(self.storage_offset, &mut bytes)
             .map_err(map_flash_error)?;
-        let magic = u32::from_le_bytes(
-            bytes
-                .get(0..4)
-                .ok_or(StorageError::InvalidHeader)?
-                .try_into()
-                .map_err(|_| StorageError::InvalidHeader)?,
-        );
+        let magic = read_header_u32_le(&bytes, 0..4)?;
         if magic != HEADER_MAGIC {
             return Err(StorageError::InvalidHeader);
         }
-        let version = u32::from_le_bytes(
-            bytes
-                .get(4..8)
-                .ok_or(StorageError::InvalidHeader)?
-                .try_into()
-                .map_err(|_| StorageError::InvalidHeader)?,
-        );
-        let start_words = u32::from_le_bytes(
-            bytes
-                .get(8..12)
-                .ok_or(StorageError::InvalidHeader)?
-                .try_into()
-                .map_err(|_| StorageError::InvalidHeader)?,
-        );
-        let program_words = u32::from_le_bytes(
-            bytes
-                .get(12..16)
-                .ok_or(StorageError::InvalidHeader)?
-                .try_into()
-                .map_err(|_| StorageError::InvalidHeader)?,
-        );
-        let header_crc = u32::from_le_bytes(
-            bytes
-                .get(16..20)
-                .ok_or(StorageError::InvalidHeader)?
-                .try_into()
-                .map_err(|_| StorageError::InvalidHeader)?,
-        );
-        let computed_crc = crc32_bytes(bytes.get(0..16).ok_or(StorageError::InvalidHeader)?);
+        let version = read_header_u32_le(&bytes, 4..8)?;
+        let program_words = read_header_u32_le(&bytes, 8..12)?;
+        let header_crc = read_header_u32_le(&bytes, 12..16)?;
+        let computed_crc = crc32_bytes(bytes.get(0..12).ok_or(StorageError::InvalidHeader)?);
         if computed_crc != header_crc {
             return Err(StorageError::InvalidHeader);
         }
         if version != HEADER_VERSION {
-            return Err(StorageError::InvalidHeader);
-        }
-        if start_words != u32::try_from(HEADER_WORDS).map_err(|_| StorageError::InvalidHeader)? {
             return Err(StorageError::InvalidHeader);
         }
         let capacity_words = self.program_capacity_words().ok_or(StorageError::InvalidHeader)?;
@@ -258,7 +218,6 @@ impl<F: NorFlash> FlashStorage<F> {
         }
         Ok(StorageHeader {
             version,
-            start_words,
             program_words,
             header_crc,
         })
@@ -268,6 +227,17 @@ impl<F: NorFlash> FlashStorage<F> {
         let mut bytes = [0u8; WORD_SIZE_BYTES];
         self.flash.read(offset, &mut bytes).map_err(map_flash_error)?;
         Ok(u16::from_le_bytes(bytes))
+    }
+
+    fn check_header_len(&self) -> Result<usize, StorageError> {
+        let storage_len = self
+            .storage_end
+            .checked_sub(self.storage_start)
+            .ok_or(StorageError::InvalidHeader)?;
+        if storage_len < HEADER_SIZE_BYTES {
+            return Err(StorageError::InvalidHeader);
+        }
+        Ok(storage_len)
     }
 
     fn flash_erase_range(&mut self, start: u32, len: usize) -> Result<(), StorageError> {
@@ -429,7 +399,6 @@ impl FlashProgramLoader {
 
 struct StorageHeader {
     version: u32,
-    start_words: u32,
     program_words: u32,
     header_crc: u32,
 }
@@ -445,7 +414,6 @@ fn storage_bounds() -> (usize, usize) {
 
 fn encode_header(program_words: usize) -> Result<[Word; HEADER_WORDS], StorageError> {
     let program_words = u32::try_from(program_words).map_err(|_| StorageError::ProgramTooLarge)?;
-    let start_words = u32::try_from(HEADER_WORDS).map_err(|_| StorageError::ProgramTooLarge)?;
     let mut bytes = [0u8; HEADER_SIZE_BYTES];
     bytes
         .get_mut(0..4)
@@ -458,14 +426,10 @@ fn encode_header(program_words: usize) -> Result<[Word; HEADER_WORDS], StorageEr
     bytes
         .get_mut(8..12)
         .ok_or(StorageError::ProgramTooLarge)?
-        .copy_from_slice(&start_words.to_le_bytes());
+        .copy_from_slice(&program_words.to_le_bytes());
+    let header_crc = crc32_bytes(bytes.get(0..12).ok_or(StorageError::ProgramTooLarge)?);
     bytes
         .get_mut(12..16)
-        .ok_or(StorageError::ProgramTooLarge)?
-        .copy_from_slice(&program_words.to_le_bytes());
-    let header_crc = crc32_bytes(bytes.get(0..16).ok_or(StorageError::ProgramTooLarge)?);
-    bytes
-        .get_mut(16..20)
         .ok_or(StorageError::ProgramTooLarge)?
         .copy_from_slice(&header_crc.to_le_bytes());
     let mut words = [0u16; HEADER_WORDS];
@@ -494,6 +458,15 @@ fn crc32_bytes(bytes: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+fn read_header_u32_le(bytes: &[u8], range: core::ops::Range<usize>) -> Result<u32, StorageError> {
+    let chunk = bytes
+        .get(range)
+        .ok_or(StorageError::InvalidHeader)?
+        .try_into()
+        .map_err(|_| StorageError::InvalidHeader)?;
+    Ok(u32::from_le_bytes(chunk))
 }
 
 fn align_up(value: usize, align: usize) -> Result<usize, StorageError> {
