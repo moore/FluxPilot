@@ -11,6 +11,7 @@ export class MachineControlDescriptor {
     step = 1,
     defaultValue = 0,
     units = "",
+    locals = [],
   }) {
     this.id = id;
     this.label = label;
@@ -21,6 +22,7 @@ export class MachineControlDescriptor {
     this.step = step;
     this.defaultValue = defaultValue;
     this.units = units;
+    this.locals = Array.isArray(locals) ? locals : [];
   }
 }
 
@@ -220,17 +222,17 @@ export const SIMPLE_CRAWLER_MACHINE = `
     .local led_count 5
 
     .func init index 0
-      PUSH 0
+      LOAD_STATIC init_red
       STORE red
-      PUSH 16
+      LOAD_STATIC init_green
       STORE green
-      PUSH 32
+      LOAD_STATIC init_blue
       STORE blue
-      PUSH 100
+      LOAD_STATIC init_speed
       STORE speed
-      PUSH 10
+      LOAD_STATIC init_brightness
       STORE brightness
-      PUSH 25
+      LOAD_STATIC init_led_count
       STORE led_count
       EXIT
     .end
@@ -316,11 +318,11 @@ export const PULSE_MACHINE = `
     .local brightness 3
 
     .func init index 0
-      PUSH 0
+      LOAD_STATIC init_red
       STORE red
-      PUSH 16
+      LOAD_STATIC init_green
       STORE green
-      PUSH 32
+      LOAD_STATIC init_blue
       STORE blue
       PUSH 10
       STORE brightness
@@ -402,6 +404,7 @@ export const DEFAULT_MACHINE_RACK = [
         max: 1000,
         step: 10,
         defaultValue: 1000,
+        locals: ["speed"],
       }),
       new MachineControlDescriptor({
         id: "brigntness",
@@ -412,6 +415,7 @@ export const DEFAULT_MACHINE_RACK = [
         max: 100,
         step: 1,
         defaultValue: 30,
+        locals: ["brightness"],
       }),
       new MachineControlDescriptor({
         id: "ledcount",
@@ -422,6 +426,7 @@ export const DEFAULT_MACHINE_RACK = [
         max: 1024,
         step: 1,
         defaultValue: 25,
+        locals: ["led_count"],
       }),
       new MachineControlDescriptor({
         id: "rainbow",
@@ -429,6 +434,7 @@ export const DEFAULT_MACHINE_RACK = [
         functionId: 2,
         type: "color_picker",
         defaultValue: "#468bc0ff",
+        locals: ["red", "green", "blue"],
       }),
     ],
   }),
@@ -443,6 +449,7 @@ export const DEFAULT_MACHINE_RACK = [
         functionId: 2,
         type: "color_picker",
         defaultValue: "#468bc0ff",
+        locals: ["red", "green", "blue"],
       }),
     ],
   }),
@@ -798,6 +805,9 @@ class TrackMachine extends HTMLElement {
           "value",
           String(control.defaultValue ?? control.min ?? 0)
         );
+        if (Array.isArray(control.locals) && control.locals.length) {
+          rangeControl.setAttribute("data-locals", control.locals.join(","));
+        }
         if (control.units) {
           rangeControl.setAttribute("units", String(control.units));
         }
@@ -822,6 +832,9 @@ class TrackMachine extends HTMLElement {
         colorPicker.setAttribute("control-id", control.id ?? "");
         if (typeof control.defaultValue === "string") {
           colorPicker.setAttribute("value", control.defaultValue);
+        }
+        if (Array.isArray(control.locals) && control.locals.length) {
+          colorPicker.setAttribute("data-locals", control.locals.join(","));
         }
         const handleColorEvent = (event) => {
           const value = event?.detail?.value ?? colorPicker.value;

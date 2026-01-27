@@ -14,12 +14,165 @@ const SEND_QUEUE_KEY = "__toSendQueue__";
 const DECK_KEY = "__flightDeck__";
 const HANDLERS_BOUND_KEY = "__flightDeckHandlersBound__";
 const GLOBAL_BRIGHTNESS_FUNCTION = 3;
+const CONTROL_STATIC_PREFIX = "init_";
+const CONTROL_STATIC_BLOCK = "control_statics";
 let usbReadActive = false;
 let pendingRequestId = null;
 let pendingStartTime = 0;
 let pendingTimer = null;
 let pendingCalls = new Map();
 let connectInFlight = false;
+
+function clampWord(value) {
+    const numberValue = Number(value);
+    if (!Number.isFinite(numberValue)) {
+        return 0;
+    }
+    const rounded = Math.round(numberValue);
+    return Math.max(0, Math.min(65535, rounded));
+}
+
+function parseHexColor(value) {
+    if (!value) {
+        return null;
+    }
+    const normalized = value.startsWith('#') ? value.slice(1) : value;
+    const hex = normalized.length === 8 ? normalized.slice(0, 6) : normalized;
+    if (hex.length !== 6) {
+        return null;
+    }
+    const r = Number.parseInt(hex.slice(0, 2), 16);
+    const g = Number.parseInt(hex.slice(2, 4), 16);
+    const b = Number.parseInt(hex.slice(4, 6), 16);
+    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) {
+        return null;
+    }
+    return { r, g, b };
+}
+
+function getTrackControlStatics(track) {
+    const trackMachine = track.querySelector('fd-track-machine');
+    const controlsRoot = trackMachine?.shadowRoot?.querySelector('.track-controls');
+    if (!controlsRoot) {
+        return [];
+    }
+    const statics = new Map();
+    const controls = controlsRoot.querySelectorAll('fd-range-control, fd-color-picker');
+    controls.forEach((control) => {
+        const localsRaw = control.getAttribute('data-locals');
+        if (!localsRaw) {
+            return;
+        }
+        const locals = localsRaw.split(',').map((entry) => entry.trim()).filter(Boolean);
+        if (!locals.length) {
+            return;
+        }
+        const tag = control.tagName.toLowerCase();
+        if (tag === 'fd-range-control') {
+            const value = clampWord(control.getAttribute('value') ?? control.value);
+            locals.forEach((local) => {
+                statics.set(local, value);
+            });
+            return;
+        }
+        if (tag === 'fd-color-picker') {
+            const rgb = parseHexColor(control.getAttribute('value') ?? control.value);
+            if (!rgb) {
+                return;
+            }
+            const values = [rgb.r, rgb.g, rgb.b];
+            locals.forEach((local, index) => {
+                if (index >= values.length) {
+                    return;
+                }
+                statics.set(local, clampWord(values[index]));
+            });
+        }
+    });
+    return Array.from(statics.entries()).map(([local, value]) => ({
+        label: `${CONTROL_STATIC_PREFIX}${local}`,
+        value,
+    }));
+}
+
+function stripControlStaticsBlock(source) {
+    const lines = source.split(/\r?\n/);
+    const header = `.data ${CONTROL_STATIC_BLOCK}`;
+    let startIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === header) {
+            startIndex = i;
+            break;
+        }
+    }
+    if (startIndex === -1) {
+        return source;
+    }
+    let endIndex = -1;
+    for (let i = startIndex + 1; i < lines.length; i++) {
+        if (lines[i].trim() === '.end') {
+            endIndex = i;
+            break;
+        }
+    }
+    if (endIndex === -1) {
+        return source;
+    }
+    lines.splice(startIndex, endIndex - startIndex + 1);
+    return lines.join('\n');
+}
+
+function buildControlStaticsBlock(statics) {
+    if (!statics.length) {
+        return '';
+    }
+    const lines = [`.data ${CONTROL_STATIC_BLOCK}`];
+    statics.forEach(({ label, value }) => {
+        lines.push(`    ${label}:`);
+        lines.push(`    .word ${value}`);
+    });
+    lines.push('.end');
+    return lines.join('\n');
+}
+
+function injectControlStatics(source, statics) {
+    if (!statics.length) {
+        return source;
+    }
+    const cleaned = stripControlStaticsBlock(source);
+    const block = buildControlStaticsBlock(statics);
+    if (!block) {
+        return cleaned;
+    }
+    const lines = cleaned.split(/\r?\n/);
+    let insertIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (!trimmed) {
+            continue;
+        }
+        if (trimmed.startsWith('.machine')) {
+            continue;
+        }
+        if (trimmed.startsWith('.local')) {
+            continue;
+        }
+        if (
+            trimmed.startsWith('.func') ||
+            trimmed.startsWith('.func_decl') ||
+            trimmed.startsWith('.data') ||
+            trimmed === '.end'
+        ) {
+            insertIndex = i;
+            break;
+        }
+    }
+    if (insertIndex === -1) {
+        return `${cleaned.trimEnd()}\n${block}\n`;
+    }
+    lines.splice(insertIndex, 0, ...block.split('\n'));
+    return lines.join('\n');
+}
 
 class DeckReceiveHandler {
     onReturn(requestId, result) {
@@ -46,13 +199,13 @@ export async function initDeck() {
 .machine main locals 4 functions 4
 
 .func init index 0
-    push 8
-    push 16
-    push 32
+    LOAD_STATIC init_red
     STORE 0
+    LOAD_STATIC init_green
     STORE 1
+    LOAD_STATIC init_blue
     STORE 2
-    push 100
+    LOAD_STATIC init_brightness
     STORE 3
     EXIT
 .end
@@ -103,6 +256,17 @@ export async function initDeck() {
     PUSH 100
     DIV
     EXIT
+.end
+
+.data control_statics
+    init_red:
+    .word 8
+    init_green:
+    .word 16
+    init_blue:
+    .word 32
+    init_brightness:
+    .word 100
 .end
 
 .end
@@ -187,12 +351,22 @@ function buildProgramSourceFromTracks() {
         if (isEmpty) {
             return;
         }
+        let rawSource = '';
         if (machineSource === 'editor' && editorEl?.value?.trim()) {
-            sources.push(editorEl.value);
-            return;
+            rawSource = editorEl.value;
+        } else if (machineAssembly.trim()) {
+            rawSource = machineAssembly;
         }
-        if (machineAssembly.trim()) {
-            sources.push(machineAssembly);
+        if (rawSource) {
+            const statics = getTrackControlStatics(track);
+            const sourceWithStatics = injectControlStatics(rawSource, statics);
+            if (machineSource === 'editor' && editorEl && editorEl.value !== sourceWithStatics) {
+                editorEl.value = sourceWithStatics;
+            }
+            if (machineAssembly !== sourceWithStatics) {
+                track.dataset.machineAssembly = sourceWithStatics;
+            }
+            sources.push(sourceWithStatics);
             return;
         }
         missing.push(machineId || `track ${index + 1}`);
