@@ -267,11 +267,11 @@ export const SIMPLE_CRAWLER_MACHINE = `
       .frame ticks 4
       SLOAD led_index
       SLOAD ticks
-      LOAD speed
-      MOD ; count up speed ms
-      LOAD speed
+      LOAD speed ; Ticks per led
       LOAD led_count
-      DIV
+      MUL  ; total ticks for a anamation cycle
+      MOD ; count up total ticks and cycle
+      LOAD speed
       DIV
       BREQ match
       SLOAD sred
