@@ -16,7 +16,7 @@ use std::vec::Vec as StdVec;
 
 const MAX_ARGS: usize = 10;
 const MAX_RESULT: usize = 3;
-const PROGRAM_BLOCK_SIZE: usize = 100;
+const PROGRAM_BLOCK_SIZE: usize = 64;
 const ASM_MACHINE_MAX: usize = 8;
 const ASM_FUNCTION_MAX: usize = 32;
 const ASM_LABEL_CAP: usize = 64;
