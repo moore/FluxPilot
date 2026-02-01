@@ -14,9 +14,9 @@
 
 ## Phase 2
 
- 1. Debug why large programs crash the fermware
- 2. Store UI state on flash and reload to UI on usb connect.
- 3. Move to to u32 for stack instead of u16
+ 1. ~~Debug why large programs crash the fermware~~
+ 2. ~~Store UI state on flash and reload to UI on usb connect.~~
+ 3. ~~Move to to u32 for stack instead of u16~~
  4. Allow common functions in shared static to reduce duplcation across machines.
  
 ## Phase 3
