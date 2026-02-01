@@ -13,6 +13,7 @@ pub async fn led_loop<
     const MAX_ARGS: usize,
     const MAX_RESULT: usize,
     const PROGRAM_BLOCK_SIZE: usize,
+    const UI_BLOCK_SIZE: usize,
     const STACK_SIZE: usize,
     const NUM_LEDS: usize,
     const FRAME_TARGET_MS: u64,
@@ -21,7 +22,16 @@ pub async fn led_loop<
     data: &mut [RGB8; NUM_LEDS],
     shared: &'static Mutex<
         CriticalSectionRawMutex,
-        PliotShared<'static, 'static, S, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, STACK_SIZE>,
+        PliotShared<
+            'static,
+            'static,
+            S,
+            MAX_ARGS,
+            MAX_RESULT,
+            PROGRAM_BLOCK_SIZE,
+            UI_BLOCK_SIZE,
+            STACK_SIZE,
+        >,
     >,
 ) where
     W: SmartLedsWrite<Color = RGB8>,

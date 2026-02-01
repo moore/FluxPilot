@@ -17,12 +17,13 @@ use std::vec::Vec as StdVec;
 const MAX_ARGS: usize = 10;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 64;
+const UI_BLOCK_SIZE: usize = 128;
 const ASM_MACHINE_MAX: usize = 8;
 const ASM_FUNCTION_MAX: usize = 32;
 const ASM_LABEL_CAP: usize = 64;
 const ASM_DATA_CAP: usize = 256;
 
-type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
+type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>;
 
 #[wasm_bindgen]
 pub enum FlightDeckError {
@@ -73,13 +74,22 @@ extern "C" {
         error_code: u32,
         error_message: &str,
     );
+
+    #[wasm_bindgen(method, js_name = onUiStateBlock)]
+    pub fn on_ui_state_block(
+        this: &ReceiveHandler,
+        request_id: u64,
+        total_size: u32,
+        block_number: u32,
+        block: &[u8],
+    );
 }
 
 
 
 #[wasm_bindgen]
 pub struct FlightDeck {
-    controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>,
+    controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>,
 }
 
 #[wasm_bindgen]
@@ -167,7 +177,7 @@ impl FlightDeck {
         let message_buf = to_vec_cobs::<ProtocolType, 512>(&message)
             .map_err(|_| FlightDeckError::CouldNotEncode)?;
         let bytes = message_buf.as_slice();
-                send(bytes);
+        send(bytes);
 
         let request_id = message.get_request_id().map(|id| id.value());
 
@@ -193,17 +203,34 @@ impl FlightDeck {
                     result.as_slice(),
                 );
             }
-            Protocol::Error { request_id, error_type } => {
+            Protocol::Error {
+                request_id,
+                error_type,
+                location,
+            } => {
                 let (has_request_id, request_id_value) = match request_id {
                     Some(id) => (true, id.value()),
                     None => (false, 0),
                 };
-                let message = error_message(&error_type);
+                let message = error_message(&error_type, location.as_ref());
                 handler.on_error(
                     has_request_id,
                     request_id_value,
                     error_code(&error_type),
                     &message,
+                );
+            }
+            Protocol::UiStateBlock {
+                request_id,
+                total_size,
+                block_number,
+                block,
+            } => {
+                handler.on_ui_state_block(
+                    request_id.value(),
+                    total_size,
+                    block_number,
+                    block.as_slice(),
                 );
             }
             _ => {
@@ -213,21 +240,34 @@ impl FlightDeck {
         Ok(())   
     }
 
-    pub fn load_program(&mut self, program: &[Word], length: usize) -> Result<(), FlightDeckError> {
+    pub fn load_program(
+        &mut self,
+        program: &[Word],
+        length: usize,
+        ui_state: &[u8],
+    ) -> Result<(), FlightDeckError> {
         if length > program.len() {
             return Err(FlightDeckError::InvalidProgramLength);
         }
 
         let program = &program[..length];
-        let loader = self.controler.get_program_loader(program);
+        let loader = self.controler.get_program_loader(program, ui_state);
         for message in loader {
-            console_log(format!("sending {:?}", message).as_str());
             let message_buf = to_vec_cobs::<ProtocolType, 512>(&message)
                 .map_err(|_| FlightDeckError::CouldNotEncode)?;
             send(message_buf.as_slice());
         }
 
         Ok(())
+    }
+
+    pub fn read_ui_state_block(&mut self, block_number: u32) -> Result<Option<u64>, FlightDeckError> {
+        let message = self.controler.read_ui_state(block_number);
+        let message_buf = to_vec_cobs::<ProtocolType, 512>(&message)
+            .map_err(|_| FlightDeckError::CouldNotEncode)?;
+        send(message_buf.as_slice());
+        let request_id = message.get_request_id().map(|id| id.value());
+        Ok(request_id)
     }
 }
 
@@ -240,16 +280,23 @@ const fn error_code(error_type: &ErrorType) -> u32 {
         ErrorType::UnexpectedMessageType(_) => 5,
         ErrorType::InvalidMessage => 6,
         ErrorType::ProgramTooLarge => 7,
-        ErrorType::UnalignedWrite => 8,
-        ErrorType::WriteFailed => 9,
-        ErrorType::InvalidHeader => 10,
-        ErrorType::InvalidProgram => 11,
-        ErrorType::UnknownProgram => 12,
+        ErrorType::ProgramIncomplete => 8,
+        ErrorType::UnalignedWrite => 9,
+        ErrorType::WriteFailed => 10,
+        ErrorType::InvalidHeader => 11,
+        ErrorType::InvalidProgram => 12,
+        ErrorType::UnknownProgram => 13,
+        ErrorType::UiStateTooLarge => 14,
+        ErrorType::UiStateIncomplete => 15,
+        ErrorType::UiStateReadOutOfBounds => 16,
     }
 }
 
-fn error_message(error_type: &ErrorType) -> String {
-    match error_type {
+fn error_message(
+    error_type: &ErrorType,
+    location: Option<&pliot::protocol::ErrorLocation>,
+) -> String {
+    let base = match error_type {
         ErrorType::UnknownResuestId(_) => "unknown request id".to_string(),
         ErrorType::UnexpectedProgramBlock(_) => "unexpected program block".to_string(),
         ErrorType::UnknownMachine(_) => "unknown machine".to_string(),
@@ -259,11 +306,26 @@ fn error_message(error_type: &ErrorType) -> String {
         }
         ErrorType::InvalidMessage => "invalid message (too large or corrupted)".to_string(),
         ErrorType::ProgramTooLarge => "program too large".to_string(),
+        ErrorType::ProgramIncomplete => "program incomplete".to_string(),
         ErrorType::UnalignedWrite => "unaligned flash write".to_string(),
         ErrorType::WriteFailed => "flash write failed".to_string(),
         ErrorType::InvalidHeader => "invalid flash header".to_string(),
         ErrorType::InvalidProgram => "invalid program".to_string(),
         ErrorType::UnknownProgram => "unknown program".to_string(),
+        ErrorType::UiStateTooLarge => "ui state too large".to_string(),
+        ErrorType::UiStateIncomplete => "ui state incomplete".to_string(),
+        ErrorType::UiStateReadOutOfBounds => "ui state read out of bounds".to_string(),
+    };
+
+    match location {
+        Some(location) => format!(
+            "{} (at {}:{}:{})",
+            base,
+            location.file.as_str(),
+            location.line,
+            location.column
+        ),
+        None => base,
     }
 }
 
@@ -275,6 +337,8 @@ const fn message_type_name(message_type: &MessageType) -> &'static str {
         MessageType::Error => "Error",
         MessageType::LoadProgram => "LoadProgram",
         MessageType::ProgramBlock => "ProgramBlock",
+        MessageType::UiStateBlock => "UiStateBlock",
+        MessageType::ReadUiState => "ReadUiState",
         MessageType::FinishProgram => "FinishProgram",
     }
 }

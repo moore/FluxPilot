@@ -20,8 +20,9 @@ use heapless::Vec;
 const MAX_ARGS: usize = 3;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
+const UI_BLOCK_SIZE: usize = 128;
 
-type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE>;
+type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>;
 
 fn build_simple_crawler_machine_lines(name: &str, init: [Word; 6]) -> StdVec<String> {
     let source = format!(
@@ -186,17 +187,23 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     println!("program {:?}", program);
 
     let mut storage_buffer = [0u16; 100];
-    let mut storage = MemStorage::new(storage_buffer.as_mut_slice());
+    let mut ui_state = [0u8; 512];
+    let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state.as_mut_slice());
 
-    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
+    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
+        Controler::new();
 
     let mut stack: Vec<Word, 100> = Vec::new();
     let mut globals = [0u16; 10];
     let memory = globals.as_mut_slice();
     let mut pliot =
-        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(&mut storage, memory);
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory,
+        );
 
-    let loader = controler.get_program_loader(program);
+    let ui_state: [u8; 0] = [];
+    let loader = controler.get_program_loader(program, &ui_state);
 
     let mut out_buf = vec![0u8; 1024];
 
@@ -334,16 +341,22 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     let program = &buffer[..descriptor.length];
 
     let mut storage_buffer = [0u16; 2048];
-    let mut storage = MemStorage::new(storage_buffer.as_mut_slice());
-    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE> = Controler::new();
+    let mut ui_state = [0u8; 512];
+    let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state.as_mut_slice());
+    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
+        Controler::new();
 
     let mut stack: Vec<Word, STACK_CAP> = Vec::new();
     let mut globals = [0u16; 32];
     let memory = globals.as_mut_slice();
     let mut pliot =
-        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, MemStorage>::new(&mut storage, memory);
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory,
+        );
 
-    let loader = controler.get_program_loader(program);
+    let ui_state: [u8; 0] = [];
+    let loader = controler.get_program_loader(program, &ui_state);
     let mut out_buf = vec![0u8; 1024];
 
     for message in loader {
@@ -381,6 +394,93 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
                 pliot.get_led_color(machine_index, j, i, &mut stack)?;
             }
         }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_read_ui_state_blocks() -> Result<(), PliotError> {
+    const MACHINE_COUNT: usize = 1;
+    const FUNCTION_COUNT: usize = 1;
+    const LABEL_CAP: usize = 16;
+    const DATA_CAP: usize = 16;
+
+    let mut buffer = [0u16; 256];
+    let builder =
+        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as Word)
+            .unwrap();
+    let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
+        Assembler::new(builder);
+
+    let lines = [
+        ".machine main locals 0 functions 1",
+        "    .func init index 0",
+        "      EXIT",
+        "    .end",
+        ".end",
+    ];
+    for line in lines.iter() {
+        asm.add_line(line).unwrap();
+    }
+
+    let descriptor = asm.finish().unwrap();
+    let program = &buffer[..descriptor.length];
+
+    let mut storage_buffer = [0u16; 256];
+    let mut ui_state_mem = [0u8; 256];
+    let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state_mem.as_mut_slice());
+    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
+        Controler::new();
+
+    let mut stack: Vec<Word, 32> = Vec::new();
+    let mut globals = [0u16; 8];
+    let memory = globals.as_mut_slice();
+    let mut pliot =
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory,
+        );
+
+    let ui_state: [u8; 5] = [1, 2, 3, 4, 5];
+    let loader = controler.get_program_loader(program, &ui_state);
+    let mut out_buf = vec![0u8; 1024];
+
+    for message in loader {
+        let mut in_buf = to_vec_cobs::<ProtocolType, 2048>(&message).unwrap();
+        let wrote = pliot.process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())?;
+        assert_eq!(0, wrote);
+    }
+
+    let read_block = controler.read_ui_state(0);
+    let mut in_buf = to_vec_cobs::<ProtocolType, 256>(&read_block).unwrap();
+    let wrote = pliot.process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())?;
+    let response: ProtocolType =
+        from_bytes_cobs(&mut out_buf[..wrote]).expect("could not read response");
+    match response {
+        Protocol::UiStateBlock {
+            total_size,
+            block_number,
+            block,
+            ..
+        } => {
+            assert_eq!(total_size, ui_state.len() as u32);
+            assert_eq!(block_number, 0);
+            assert_eq!(block.as_slice(), ui_state.as_slice());
+        }
+        _ => panic!("response was not UiStateBlock"),
+    }
+
+    let read_block = controler.read_ui_state(1);
+    let mut in_buf = to_vec_cobs::<ProtocolType, 256>(&read_block).unwrap();
+    let wrote = pliot.process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())?;
+    let response: ProtocolType =
+        from_bytes_cobs(&mut out_buf[..wrote]).expect("could not read response");
+    match response {
+        Protocol::UiStateBlock { block, .. } => {
+            assert!(block.is_empty());
+        }
+        _ => panic!("response was not UiStateBlock"),
     }
 
     Ok(())

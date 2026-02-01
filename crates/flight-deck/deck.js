@@ -13,6 +13,8 @@ let writer = null;
 const SEND_QUEUE_KEY = "__toSendQueue__";
 const DECK_KEY = "__flightDeck__";
 const HANDLERS_BOUND_KEY = "__flightDeckHandlersBound__";
+const UI_STATE_SERIALIZE_KEY = "__serializeUiState";
+const UI_STATE_RESTORE_KEY = "__restoreUiState";
 const GLOBAL_BRIGHTNESS_FUNCTION = 3;
 const CONTROL_STATIC_PREFIX = "init_";
 const CONTROL_STATIC_BLOCK = "control_statics";
@@ -22,6 +24,9 @@ let pendingStartTime = 0;
 let pendingTimer = null;
 let pendingCalls = new Map();
 let connectInFlight = false;
+let uiStateFetch = null;
+let pendingUiStateBytes = null;
+let incomingFrame = [];
 
 function clampWord(value) {
     const numberValue = Number(value);
@@ -48,6 +53,120 @@ function parseHexColor(value) {
         return null;
     }
     return { r, g, b };
+}
+
+function getUiStateSerializer() {
+    const fn = globalThis[UI_STATE_SERIALIZE_KEY];
+    return typeof fn === 'function' ? fn : null;
+}
+
+function getUiStateRestorer() {
+    const fn = globalThis[UI_STATE_RESTORE_KEY];
+    return typeof fn === 'function' ? fn : null;
+}
+
+async function gzipBytes(bytes) {
+    if (!('CompressionStream' in globalThis)) {
+        throw new Error('CompressionStream not supported.');
+    }
+    const compressed = await new Response(
+        new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))
+    ).arrayBuffer();
+    return new Uint8Array(compressed);
+}
+
+async function gunzipBytes(bytes) {
+    if (!('DecompressionStream' in globalThis)) {
+        throw new Error('DecompressionStream not supported.');
+    }
+    const decompressed = await new Response(
+        new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+    ).arrayBuffer();
+    return new Uint8Array(decompressed);
+}
+
+async function buildCompressedUiState() {
+    const serialize = getUiStateSerializer();
+    if (!serialize) {
+        return new Uint8Array();
+    }
+    const raw = serialize();
+    if (!(raw instanceof Uint8Array)) {
+        return new Uint8Array();
+    }
+    if (!raw.length) {
+        return raw;
+    }
+    console.log("uncompressed UI len", raw.length);
+    const result = await gzipBytes(raw);
+    console.log("compressed size", result.length);
+    return result;
+}
+
+async function applyCompressedUiState(bytes) {
+    if (!bytes || !bytes.length) {
+        return;
+    }
+    const restore = getUiStateRestorer();
+    if (!restore) {
+        pendingUiStateBytes = bytes;
+        setTimeout(() => {
+            if (pendingUiStateBytes) {
+                void applyCompressedUiState(pendingUiStateBytes);
+                pendingUiStateBytes = null;
+            }
+        }, 250);
+        return;
+    }
+    try {
+        const decompressed = await gunzipBytes(bytes);
+        restore(decompressed, { replace: true });
+    } catch (err) {
+        console.error('UI state restore failed:', err);
+        setStatus('Failed to restore UI state from device.');
+    }
+}
+
+export function notifyUiReady() {
+    if (pendingUiStateBytes) {
+        const bytes = pendingUiStateBytes;
+        pendingUiStateBytes = null;
+        void applyCompressedUiState(bytes);
+    }
+}
+
+function startUiStateFetch() {
+    const deck = globalThis[DECK_KEY];
+    if (!deck) {
+        return;
+    }
+    uiStateFetch = {
+        totalSize: null,
+        received: 0,
+        nextBlock: 0,
+        chunks: [],
+        inFlight: false,
+    };
+    requestNextUiStateBlock();
+}
+
+function requestNextUiStateBlock() {
+    const deck = globalThis[DECK_KEY];
+    if (!deck || !uiStateFetch || uiStateFetch.inFlight) {
+        return;
+    }
+    uiStateFetch.inFlight = true;
+    try {
+        let request_id = deck.read_ui_state_block(uiStateFetch.nextBlock);
+    } catch (err) {
+        uiStateFetch = null;
+    }
+}
+
+function scheduleNextUiStateBlock() {
+    setTimeout(() => {
+        requestNextUiStateBlock();
+    }, 0);
 }
 
 function getTrackControlStatics(track) {
@@ -185,6 +304,47 @@ class DeckReceiveHandler {
 
     onError(hasRequestId, requestId, errorCode, errorString) {
         console.warn("error", { hasRequestId, requestId, errorCode, errorString});
+    }
+
+    onUiStateBlock(requestId, totalSize, blockNumber, block) {
+        if (!uiStateFetch) {
+            return;
+        }
+        uiStateFetch.inFlight = false;
+        if (uiStateFetch.totalSize === null) {
+            uiStateFetch.totalSize = totalSize;
+        }
+        if (!totalSize) {
+            uiStateFetch = null;
+            return;
+        }
+        if (blockNumber !== uiStateFetch.nextBlock) {
+            console.warn('Unexpected UI state block', { blockNumber, expected: uiStateFetch.nextBlock });
+            uiStateFetch = null;
+            return;
+        }
+        const chunk = block instanceof Uint8Array ? block.slice() : new Uint8Array(block);
+        uiStateFetch.chunks.push(chunk);
+        uiStateFetch.received += chunk.length;
+        uiStateFetch.nextBlock += 1;
+        if (uiStateFetch.received >= uiStateFetch.totalSize) {
+            const total = uiStateFetch.totalSize;
+            const combined = new Uint8Array(total);
+            let offset = 0;
+            uiStateFetch.chunks.forEach((part) => {
+                const remaining = total - offset;
+                if (remaining <= 0) {
+                    return;
+                }
+                const slice = part.length > remaining ? part.slice(0, remaining) : part;
+                combined.set(slice, offset);
+                offset += slice.length;
+            });
+            uiStateFetch = null;
+            void applyCompressedUiState(combined);
+        } else {
+            scheduleNextUiStateBlock();
+        }
     }
 }
 
@@ -399,6 +559,7 @@ function disableControls() {
 
 function handleDisconnect(message) {
     writer = null;
+    uiStateFetch = null;
     setConnectionState(false);
     disableControls();
     if (message) {
@@ -556,6 +717,7 @@ async function connectUsbDevice(device) {
         enableControls();
         setConnectionState(true);
         setStatus('Connected via WebUSB.');
+        startUiStateFetch();
     } finally {
         connectInFlight = false;
     }
@@ -579,10 +741,16 @@ export async function autoConnect() {
 }
 
 async function sendMessage(message) {
-    if (!writer) { setStatus('Device not connected.'); return; }
+    if (!writer) { 
+        console.log("not connected in sendMessage");
+        setStatus('Device not connected.'); 
+        return;
+    }
     try {
         if (writer.type === 'usb') {
             await writer.device.transferOut(writer.outEndpoint, message);
+        } else {
+            console.log("no USB in sendMessage!")
         }
         setStatus(`Sent ${message.length} bytes`);
     } catch (err) {
@@ -630,13 +798,24 @@ async function startUsbReceiveLoop(device) {
                     result.data.byteOffset,
                     result.data.byteLength
                 );
-                const copy = new Uint8Array(data);
                 let deck = globalThis[DECK_KEY];
                 if (!deck) {
                     setStatus('Deck not initialized yet.');
                     continue;
                 }
-                deck.receive(copy, receiveHandler);
+                for (const byte of data) {
+                    incomingFrame.push(byte);
+                    if (byte !== 0) {
+                        continue;
+                    }
+                    const frame = new Uint8Array(incomingFrame);
+                    incomingFrame = [];
+                    try {
+                        deck.receive(frame, receiveHandler);
+                    } catch (err) {
+                        console.error('Receive error:', err);
+                    }
+                }
             } else {
                 console.warn('USB read status:', result.status);
             }
@@ -652,7 +831,7 @@ async function startUsbReceiveLoop(device) {
 if (!globalThis[HANDLERS_BOUND_KEY]) {
     globalThis[HANDLERS_BOUND_KEY] = true;
     connectBtn?.addEventListener('click', connect);
-    loadProgramBtn?.addEventListener('click', () => {
+    loadProgramBtn?.addEventListener('click', async () => {
         let deck = globalThis[DECK_KEY];
         if (!deck) {
             setStatus('Deck not initialized yet.');
@@ -666,10 +845,9 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
         }
         const programBuffer = new Uint16Array(512);
         try {
-            console.log("loading program", source);
             const descriptor = compile_program(source, programBuffer);
-            console.log("program len", descriptor.length);
-            deck.load_program(programBuffer, descriptor.length);
+            const uiStateBytes = await buildCompressedUiState();
+            deck.load_program(programBuffer, descriptor.length, uiStateBytes);
             setStatus(`Loaded program (${descriptor.length} words)`);
         } catch (err) {
             console.error('Load program error:', err);
@@ -689,9 +867,9 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
     }
     const programBuffer = new Uint16Array(512);
     try {
-        console.log("loading program", programSource);
         const descriptor = compile_program(programSource, programBuffer);
-        deck.load_program(programBuffer, descriptor.length);
+        const uiStateBytes = await buildCompressedUiState();
+        deck.load_program(programBuffer, descriptor.length, uiStateBytes);
         setStatus(`Loaded program (${descriptor.length} words)`);
         } catch (err) {
             console.error('Load program error:', err);

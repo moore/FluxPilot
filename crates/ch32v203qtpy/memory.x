@@ -1,38 +1,22 @@
-/* CH32V203G6 */
+/* CH32V203G8R6 */
 MEMORY
 {
-	FLASH : ORIGIN = 0x00000000, LENGTH = 32k
-	RAM : ORIGIN = 0x20000000, LENGTH = 10k
-	/* Non Zero Wait Flash, 224K - 32K = 192K */
-	FLASH1 : ORIGIN = 0x00008000, LENGTH = 192K
+	FLASH : ORIGIN = 0x00000000, LENGTH = 56K
+	FLASH_STORAGE : ORIGIN = ORIGIN(FLASH) + LENGTH(FLASH), LENGTH = 8K
+	RAM : ORIGIN = 0x20000000, LENGTH = 20K
 }
 
 SECTIONS
 {
-    /* Reserve the tail of FLASH1 for flash-backed storage. */
-    __storage_size = 8K;
-    __storage_start = ORIGIN(FLASH1) + LENGTH(FLASH1) - __storage_size;
-    __storage_end = ORIGIN(FLASH1) + LENGTH(FLASH1);
-
-    .coldtext :
-    {
-        . = ALIGN(4);
-        KEEP(*(SORT_NONE(.coldtext .coldtext.*)))
-        . = ALIGN(4);
-    } >FLASH1 AT>FLASH1
-
-    .coldrodata :
-    {
-        . = ALIGN(4);
-        KEEP(*(SORT_NONE(.coldrodata .coldrodata.*)))
-        . = ALIGN(4);
-    } >FLASH1 AT>FLASH1
+    /* Reserve the tail of flash for flash-backed storage. */
+    __storage_start = ORIGIN(FLASH_STORAGE);
+    __storage_end = ORIGIN(FLASH_STORAGE) + LENGTH(FLASH_STORAGE);
 
     .storage (NOLOAD) :
     {
         . = __storage_start;
-        . += __storage_size;
-    } >FLASH1 AT>FLASH1
+        . = __storage_end;
+    } >FLASH_STORAGE AT>FLASH_STORAGE
 }
 
 REGION_ALIAS("REGION_TEXT", FLASH);

@@ -66,11 +66,13 @@ bind_interrupts!(struct Irqs {
 const MAX_ARGS: usize = 3;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
+const UI_BLOCK_SIZE: usize = 128;
 const INCOMING_MESSAGE_CAP: usize = 128;
 const OUTGOING_MESSAGE_CAP: usize = 128;
 const NUM_LEDS: usize = 25;
 const FRAME_TARGET: u64 = 16;
 const PROGRAM_BUFFER_SIZE: usize = 1024;
+const UI_STATE_BUFFER_SIZE: usize = 1024;
 const USB_RECEIVE_BUF_SIZE: usize = 265; // BUG: I don't know the correct size
 const STACK_SIZE: usize = 100;
 #[cfg(feature = "storage-flash")]
@@ -81,6 +83,7 @@ compile_error!("Enable only one of `storage-mem` or `storage-flash` features.");
 compile_error!("Enable exactly one of `storage-mem` or `storage-flash` features.");
 
 static PROGRAM_BUFFER: StaticCell<[u16; PROGRAM_BUFFER_SIZE]> = StaticCell::new();
+static UI_STATE_BUFFER: StaticCell<[u8; UI_STATE_BUFFER_SIZE]> = StaticCell::new();
 static GLOBALS: StaticCell<[u16; 10]> = StaticCell::new();
 #[cfg(feature = "storage-mem")]
 static MEM_STORAGE: StaticCell<MemStorage<'static>> = StaticCell::new();
@@ -100,7 +103,16 @@ type StorageImpl = MemStorage<'static>;
 type StorageImpl = FlashStorage;
 
 type SharedState =
-    PliotShared<'static, 'static, StorageImpl, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, STACK_SIZE>;
+    PliotShared<
+        'static,
+        'static,
+        StorageImpl,
+        MAX_ARGS,
+        MAX_RESULT,
+        PROGRAM_BLOCK_SIZE,
+        UI_BLOCK_SIZE,
+        STACK_SIZE,
+    >;
 
 static mut DEBUG_WS: *mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>> =
     core::ptr::null_mut();
@@ -213,11 +225,15 @@ async fn main(spawner: Spawner) -> () {
             // BUG: we should log here.
             return;
         }
-        MEM_STORAGE.init(MemStorage::new(program_buffer.as_mut_slice()))
+        let ui_state_buffer = UI_STATE_BUFFER.init([0u8; UI_STATE_BUFFER_SIZE]);
+        MEM_STORAGE.init(MemStorage::new(
+            program_buffer.as_mut_slice(),
+            ui_state_buffer.as_mut_slice(),
+        ))
     };
     #[cfg(feature = "storage-flash")]
     let storage = {
-        use pliot::StorageError;
+        use pliot::{StorageError, StorageErrorKind};
 
         let flash_size = hal::signature::flash_size_kb() as usize * 1024;
         let mut storage = match FlashStorage::new(Ch32Flash::new(FLASH_BASE, flash_size), FLASH_BASE)
@@ -230,7 +246,7 @@ async fn main(spawner: Spawner) -> () {
         };
         match storage.load_header() {
             Ok(()) => {}
-            Err(StorageError::InvalidHeader) => {
+            Err(err) if err.kind() == StorageErrorKind::InvalidHeader => {
                 if storage.probe_write_read().is_err() {
                     // BUG: we should log here.
                     return;
@@ -300,6 +316,7 @@ async fn main(spawner: Spawner) -> () {
         MAX_ARGS,
         MAX_RESULT,
         PROGRAM_BLOCK_SIZE,
+        UI_BLOCK_SIZE,
         STACK_SIZE,
         NUM_LEDS,
         FRAME_TARGET,
@@ -332,6 +349,7 @@ async fn io_task(
             MAX_ARGS,
             MAX_RESULT,
             PROGRAM_BLOCK_SIZE,
+            UI_BLOCK_SIZE,
             STACK_SIZE,
             USB_RECEIVE_BUF_SIZE,
             INCOMING_MESSAGE_CAP,

@@ -14,9 +14,10 @@ pub struct PliotShared<
     const MAX_ARGS: usize,
     const MAX_RESULT: usize,
     const PROGRAM_BLOCK_SIZE: usize,
+    const UI_BLOCK_SIZE: usize,
     const STACK_SIZE: usize,
 > {
-    pub pliot: Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, S>,
+    pub pliot: Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, S>,
     pub stack: Vec<Word, STACK_SIZE>,
 }
 
@@ -40,6 +41,7 @@ pub async fn io_loop<
     const MAX_ARGS: usize,
     const MAX_RESULT: usize,
     const PROGRAM_BLOCK_SIZE: usize,
+    const UI_BLOCK_SIZE: usize,
     const STACK_SIZE: usize,
     const USB_BUF_SIZE: usize,
     const IN_CAP: usize,
@@ -49,7 +51,7 @@ pub async fn io_loop<
     sender: &mut VendorSender<'d, D>,
     shared: &'static Mutex<
         CriticalSectionRawMutex,
-        PliotShared<'a, 'b, S, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, STACK_SIZE>,
+        PliotShared<'a, 'b, S, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, STACK_SIZE>,
     >,
     usb_buf: &mut [u8; USB_BUF_SIZE],
     frame: &mut Vec<u8, IN_CAP>,

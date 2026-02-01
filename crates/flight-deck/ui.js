@@ -1,4 +1,10 @@
-import { consumeQueue, initDeck, autoConnect, callMachineFunction } from "/deck.js";
+import {
+  consumeQueue,
+  initDeck,
+  autoConnect,
+  callMachineFunction,
+  notifyUiReady,
+} from "/deck.js";
 
 export class MachineControlDescriptor {
   constructor({
@@ -111,6 +117,167 @@ function sendControlCall(element, control, args) {
   callMachineFunction(machineIndex, functionId, sanitized);
 }
 
+const UI_STATE_VERSION = 1;
+
+function buildTrackElement({ name, meta, machineId, assembly, controls, source }) {
+  const track = document.createElement("fd-track");
+  const machine = document.createElement("fd-track-machine");
+  machine.setAttribute("name", name || "Machine");
+  machine.setAttribute("meta", meta || "Machine");
+  machine.controls = Array.isArray(controls) ? controls : [];
+  if (machineId) {
+    track.dataset.machineId = machineId;
+  }
+  if (source) {
+    track.dataset.machineSource = source;
+  }
+  if (assembly) {
+    track.dataset.machineAssembly = assembly;
+  }
+  track.appendChild(machine);
+  return track;
+}
+
+function snapshotControlValues(trackMachine) {
+  const values = {};
+  const controlsRoot = trackMachine?.shadowRoot?.querySelector(".track-controls");
+  if (!controlsRoot) {
+    return values;
+  }
+  const controls = controlsRoot.querySelectorAll(
+    "fd-range-control, fd-color-picker"
+  );
+  controls.forEach((control) => {
+    const controlId = control.getAttribute("control-id");
+    if (!controlId) {
+      return;
+    }
+    const raw =
+      control.getAttribute("value") ??
+      (typeof control.value === "string" ? control.value : "");
+    if (control.tagName.toLowerCase() === "fd-range-control") {
+      const numberValue = Number(raw);
+      values[controlId] = Number.isFinite(numberValue)
+        ? numberValue
+        : Number(control.getAttribute("value") ?? 0);
+      return;
+    }
+    values[controlId] = String(raw ?? "");
+  });
+  return values;
+}
+
+function applyControlValues(track, values) {
+  const controls = values && typeof values === "object" ? values : {};
+  const trackMachine = track.querySelector("fd-track-machine");
+  const controlsRoot = trackMachine?.shadowRoot?.querySelector(".track-controls");
+  if (!controlsRoot) {
+    return;
+  }
+  const elements = controlsRoot.querySelectorAll(
+    "fd-range-control, fd-color-picker"
+  );
+  elements.forEach((control) => {
+    const controlId = control.getAttribute("control-id");
+    if (!controlId || !(controlId in controls)) {
+      return;
+    }
+    const value = controls[controlId];
+    control.setAttribute("value", String(value));
+  });
+}
+
+export function serializeUiState() {
+  const trackList = document.getElementById("track-list");
+  if (!trackList) {
+    return new Uint8Array();
+  }
+  const tracks = Array.from(trackList.querySelectorAll("fd-track")).map(
+    (track) => {
+      const trackMachine = track.querySelector("fd-track-machine");
+      return {
+        name: trackMachine?.getAttribute("name") ?? "",
+        meta: trackMachine?.getAttribute("meta") ?? "",
+        machineId: track.dataset.machineId ?? "",
+        source: track.dataset.machineSource ?? "",
+        assembly: track.dataset.machineAssembly ?? "",
+        controls: Array.isArray(trackMachine?.controls)
+          ? trackMachine.controls
+          : [],
+        controlValues: snapshotControlValues(trackMachine),
+      };
+    }
+  );
+  const state = {
+    version: UI_STATE_VERSION,
+    tracks,
+  };
+  const json = JSON.stringify(state);
+  return new TextEncoder().encode(json);
+}
+
+export function restoreUiState(bytes, { replace = true } = {}) {
+  const trackList = document.getElementById("track-list");
+  if (!trackList) {
+    return false;
+  }
+  let buffer = bytes;
+  if (bytes instanceof ArrayBuffer) {
+    buffer = new Uint8Array(bytes);
+  }
+  if (!(buffer instanceof Uint8Array)) {
+    return false;
+  }
+  let payload;
+  try {
+    const json = new TextDecoder().decode(buffer);
+    payload = JSON.parse(json);
+  } catch (err) {
+    return false;
+  }
+  
+  if (!payload || payload.version !== UI_STATE_VERSION) {
+    return false;
+  }
+  const tracks = Array.isArray(payload.tracks) ? payload.tracks : [];
+  const machineRegistry = new Map(
+    DEFAULT_MACHINE_RACK.map((machine) => [machine.id, machine])
+  );
+  if (replace) {
+    trackList.innerHTML = "";
+  }
+  tracks.forEach((trackState) => {
+    const machineId = trackState.machineId || "";
+    const registryEntry = machineRegistry.get(machineId);
+    const controls =
+      Array.isArray(trackState.controls) && trackState.controls.length
+        ? trackState.controls
+        : registryEntry?.controls ?? [];
+    const assembly =
+      trackState.assembly || registryEntry?.assembly || "";
+    const name =
+      trackState.name || registryEntry?.name || "Machine";
+    const meta =
+      trackState.meta ||
+      (registryEntry ? "Rack Copy" : "Machine");
+    const track = buildTrackElement({
+      name,
+      meta,
+      machineId,
+      assembly,
+      controls,
+      source: trackState.source || "",
+    });
+    trackList.appendChild(track);
+    applyControlValues(track, trackState.controlValues);
+  });
+  return true;
+}
+
+if (typeof globalThis !== "undefined") {
+  globalThis.__serializeUiState = serializeUiState;
+  globalThis.__restoreUiState = restoreUiState;
+}
 export const CRAWLER_MACHINE = `
 .machine main locals 4 functions 5
     .local red 0
@@ -1333,22 +1500,14 @@ export async function runUi() {
   };
 
   const createTrack = ({ name, meta, machineId, assembly, controls, source }) => {
-    const track = document.createElement("fd-track");
-    const machine = document.createElement("fd-track-machine");
-    machine.setAttribute("name", name);
-    machine.setAttribute("meta", `${meta} · from rack`);
-    machine.controls = controls;
-    if (machineId) {
-      track.dataset.machineId = machineId;
-    }
-    if (source) {
-      track.dataset.machineSource = source;
-    }
-    if (assembly) {
-      track.dataset.machineAssembly = assembly;
-    }
-    track.appendChild(machine);
-    return track;
+    return buildTrackElement({
+      name,
+      meta: `${meta} · from rack`,
+      machineId,
+      assembly,
+      controls,
+      source,
+    });
   };
 
   const addTrackFromCard = (card) => {
@@ -1405,6 +1564,7 @@ export async function runUi() {
   }
 
   hydrateDefaultTrack();
+  notifyUiReady();
 
   machineCards.forEach((card) => {
     card.addEventListener("dragstart", (event) => {

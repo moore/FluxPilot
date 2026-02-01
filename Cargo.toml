@@ -2,6 +2,10 @@
 members = [
     "crates/*",
 ]
+default-members = [
+    "crates/pliot",
+    "crates/light_machine",
+]
 resolver = "3"
 
 [workspace.dependencies]

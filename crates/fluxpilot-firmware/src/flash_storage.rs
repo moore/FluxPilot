@@ -1,15 +1,17 @@
 //! Flash-backed storage for Pliot programs using embedded-storage flash traits.
 use embedded_storage::nor_flash::{NorFlash, NorFlashError, NorFlashErrorKind};
 use light_machine::{Program, Word};
-use pliot::{ProgramNumber, Storage, StorageError};
+use pliot::{ProgramNumber, Storage, StorageError, StorageErrorKind};
 
 const WORD_SIZE_BYTES: usize = 2;
-// Header layout: magic, version, program length (words), program crc32, sequence, header crc32.
+// Header layout: magic, version, program length (words), program crc32,
+// ui state length (bytes), ui state crc32, sequence, header crc32.
 const HEADER_MAGIC: u32 = u32::from_le_bytes(*b"PLIO");
-const HEADER_VERSION: u32 = 2;
-const HEADER_SIZE_BYTES: usize = 24;
+const HEADER_VERSION: u32 = 3;
+const HEADER_SIZE_BYTES: usize = 32;
 const HEADER_WORDS: usize = HEADER_SIZE_BYTES / WORD_SIZE_BYTES;
 const SLOT_COUNT: usize = 2;
+const MAX_WRITE_BUFFER: usize = 32;
 
 extern "C" {
     static __storage_start: u8;
@@ -22,6 +24,7 @@ pub struct FlashStorage<F: NorFlash> {
     storage_end: usize,
     storage_offset: u32,
     program_words: usize,
+    ui_state_len: usize,
     active_slot: usize,
     active_sequence: u32,
     slot_len: usize,
@@ -41,46 +44,46 @@ impl<F: NorFlash> FlashStorage<F> {
     ) -> Result<Self, StorageError> {
         let storage_len = storage_end
             .checked_sub(storage_start)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         if storage_len < HEADER_SIZE_BYTES {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         let storage_offset = storage_start
             .checked_sub(flash_base)
-            .ok_or(StorageError::InvalidHeader)?;
-        let storage_offset = u32::try_from(storage_offset).map_err(|_| StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
+        let storage_offset = u32::try_from(storage_offset).map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?;
         if storage_offset as usize % F::READ_SIZE != 0
             || storage_offset as usize % F::WRITE_SIZE != 0
             || storage_offset as usize % F::ERASE_SIZE != 0
         {
-            return Err(StorageError::UnalignedWrite);
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
         }
         if WORD_SIZE_BYTES % F::WRITE_SIZE != 0 {
-            return Err(StorageError::UnalignedWrite);
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
         }
         if HEADER_SIZE_BYTES % F::WRITE_SIZE != 0 || HEADER_SIZE_BYTES % F::READ_SIZE != 0 {
-            return Err(StorageError::UnalignedWrite);
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
         }
         let storage_end_offset = storage_offset
             .checked_add(
-                u32::try_from(storage_len).map_err(|_| StorageError::InvalidHeader)?,
+                u32::try_from(storage_len).map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?,
             )
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         if storage_end_offset as usize > flash.capacity() {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         let slot_len = storage_len
             .checked_div(SLOT_COUNT)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         let slot_len = slot_len - (slot_len % F::ERASE_SIZE);
         if slot_len < HEADER_SIZE_BYTES {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         let total_slots_len = slot_len
             .checked_mul(SLOT_COUNT)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         if total_slots_len > storage_len {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         Ok(Self {
             flash,
@@ -88,6 +91,7 @@ impl<F: NorFlash> FlashStorage<F> {
             storage_end,
             storage_offset,
             program_words: 0,
+            ui_state_len: 0,
             active_slot: 0,
             active_sequence: 0,
             slot_len,
@@ -106,6 +110,13 @@ impl<F: NorFlash> FlashStorage<F> {
             if !self.validate_program_crc(slot, program_words, header.program_crc) {
                 continue;
             }
+            let Ok(ui_state_len) = usize::try_from(header.ui_state_len) else {
+                continue;
+            };
+            if !self.validate_ui_state_crc(slot, program_words, ui_state_len, header.ui_state_crc)
+            {
+                continue;
+            }
             match best {
                 None => best = Some((slot, header)),
                 Some((_, ref current)) => {
@@ -118,12 +129,16 @@ impl<F: NorFlash> FlashStorage<F> {
 
         if let Some((slot, header)) = best {
             let program_words =
-                usize::try_from(header.program_words).map_err(|_| StorageError::InvalidHeader)?;
+                usize::try_from(header.program_words).map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?;
+            let ui_state_len =
+                usize::try_from(header.ui_state_len).map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?;
             self.program_words = program_words;
+            self.ui_state_len = ui_state_len;
             self.active_slot = slot;
             self.active_sequence = header.sequence;
         } else {
             self.program_words = 0;
+            self.ui_state_len = 0;
             self.active_slot = 0;
             self.active_sequence = 0;
         }
@@ -142,13 +157,13 @@ impl<F: NorFlash> FlashStorage<F> {
 
         let erased = self.read_word(offset)?;
         if erased != 0xFFFF {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
 
         self.flash_program_words(offset, &[TEST_VALUE])?;
         let read_value = self.read_word(offset)?;
         if read_value != TEST_VALUE {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         Ok(())
     }
@@ -158,7 +173,7 @@ impl<F: NorFlash> FlashStorage<F> {
         for slot in 0..SLOT_COUNT {
             let slot_offset = self.slot_offset(slot)?;
             self.flash_erase_range(slot_offset, erase_len)?;
-            self.flash_program_header(slot_offset, 0, crc32_empty(), 0)?;
+            self.flash_program_header(slot_offset, 0, crc32_empty(), 0, crc32_empty(), 0)?;
         }
         self.load_header()
     }
@@ -167,32 +182,40 @@ impl<F: NorFlash> FlashStorage<F> {
         let byte_len = program
             .len()
             .checked_mul(WORD_SIZE_BYTES)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         let target_slot = self.inactive_slot();
         let capacity = self
             .slot_len
             .checked_sub(HEADER_SIZE_BYTES)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         if byte_len > capacity {
-            return Err(StorageError::ProgramTooLarge);
+            return Err(StorageError::new(StorageErrorKind::ProgramTooLarge));
         }
 
         let total_len = byte_len
             .checked_add(HEADER_SIZE_BYTES)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         let erase_len = align_up(total_len, F::ERASE_SIZE)?;
 
         let slot_offset = self.slot_offset(target_slot)?;
         self.flash_erase_range(slot_offset, erase_len)?;
         let program_offset = slot_offset
             .checked_add(HEADER_SIZE_BYTES as u32)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         self.flash_program_words(program_offset, program)?;
         let program_crc = crc32_words(program);
         let sequence = self.active_sequence.wrapping_add(1);
-        self.flash_program_header(slot_offset, program.len(), program_crc, sequence)?;
+        self.flash_program_header(
+            slot_offset,
+            program.len(),
+            program_crc,
+            0,
+            crc32_empty(),
+            sequence,
+        )?;
 
         self.program_words = program.len();
+        self.ui_state_len = 0;
         self.active_slot = target_slot;
         self.active_sequence = sequence;
         Ok(())
@@ -200,44 +223,44 @@ impl<F: NorFlash> FlashStorage<F> {
 
     fn slot_offset(&self, slot: usize) -> Result<u32, StorageError> {
         if slot >= SLOT_COUNT {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         let slot_offset = self
             .slot_len
             .checked_mul(slot)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         let slot_offset =
-            u32::try_from(slot_offset).map_err(|_| StorageError::InvalidHeader)?;
+            u32::try_from(slot_offset).map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?;
         self.storage_offset
             .checked_add(slot_offset)
-            .ok_or(StorageError::InvalidHeader)
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))
     }
 
     fn slot_start_addr(&self, slot: usize) -> Result<usize, StorageError> {
         if slot >= SLOT_COUNT {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         let slot_offset = self
             .slot_len
             .checked_mul(slot)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         self.storage_start
             .checked_add(slot_offset)
-            .ok_or(StorageError::InvalidHeader)
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))
     }
 
     fn slot_end_addr(&self, slot: usize) -> Result<usize, StorageError> {
         let slot_start = self.slot_start_addr(slot)?;
         slot_start
             .checked_add(self.slot_len)
-            .ok_or(StorageError::InvalidHeader)
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))
     }
 
     fn program_start_addr(&self, slot: usize) -> Result<usize, StorageError> {
         let slot_start = self.slot_start_addr(slot)?;
         slot_start
             .checked_add(HEADER_SIZE_BYTES)
-            .ok_or(StorageError::InvalidHeader)
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))
     }
 
     fn inactive_slot(&self) -> usize {
@@ -267,6 +290,82 @@ impl<F: NorFlash> FlashStorage<F> {
             return false;
         };
         crc32_words(program) == expected_crc
+    }
+
+    fn ui_state_start(&self, slot: usize, program_words: usize) -> Result<usize, StorageError> {
+        let slot_start = self.slot_start_addr(slot)?;
+        let program_bytes = program_words
+            .checked_mul(WORD_SIZE_BYTES)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        let raw = HEADER_SIZE_BYTES
+            .checked_add(program_bytes)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        let aligned = align_up(raw, F::WRITE_SIZE)?;
+        slot_start
+            .checked_add(aligned)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))
+    }
+
+    fn ui_state_start_offset(&self, slot: usize, program_words: usize) -> Result<u32, StorageError> {
+        let slot_offset = self.slot_offset(slot)?;
+        let program_bytes = program_words
+            .checked_mul(WORD_SIZE_BYTES)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        let raw = HEADER_SIZE_BYTES
+            .checked_add(program_bytes)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        let aligned = align_up(raw, F::WRITE_SIZE)?;
+        slot_offset
+            .checked_add(
+                u32::try_from(aligned)
+                    .map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?,
+            )
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))
+    }
+
+    fn ui_state_capacity_bytes(
+        &self,
+        slot: usize,
+        program_words: usize,
+    ) -> Result<usize, StorageError> {
+        let slot_end = self.slot_end_addr(slot)?;
+        let ui_start = self.ui_state_start(slot, program_words)?;
+        slot_end
+            .checked_sub(ui_start)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))
+    }
+
+    fn ui_state_slice_for_slot<'a>(
+        &'a self,
+        slot: usize,
+        program_words: usize,
+        ui_state_len: usize,
+    ) -> Option<&'a [u8]> {
+        let ui_start = self.ui_state_start(slot, program_words).ok()?;
+        let slot_end = self.slot_end_addr(slot).ok()?;
+        let ui_end = ui_start.checked_add(ui_state_len)?;
+        if ui_end > slot_end {
+            return None;
+        }
+        let len = ui_state_len;
+        // SAFETY: The storage region is linker-defined and valid for program lifetime.
+        Some(unsafe { core::slice::from_raw_parts(ui_start as *const u8, len) })
+    }
+
+    fn validate_ui_state_crc(
+        &self,
+        slot: usize,
+        program_words: usize,
+        ui_state_len: usize,
+        expected_crc: u32,
+    ) -> bool {
+        if ui_state_len == 0 {
+            return expected_crc == crc32_empty();
+        }
+        let Some(ui_state) = self.ui_state_slice_for_slot(slot, program_words, ui_state_len) else {
+            return false;
+        };
+        crc32_bytes(ui_state) == expected_crc
     }
 
     fn program_slice<'a>(&'a self) -> &'a [Word] {
@@ -308,43 +407,53 @@ impl<F: NorFlash> FlashStorage<F> {
             .map_err(map_flash_error)?;
         let magic = read_header_u32_le(&bytes, 0..4)?;
         if magic != HEADER_MAGIC {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         let version = read_header_u32_le(&bytes, 4..8)?;
         let program_words = read_header_u32_le(&bytes, 8..12)?;
         let program_crc = read_header_u32_le(&bytes, 12..16)?;
-        let sequence = read_header_u32_le(&bytes, 16..20)?;
-        let header_crc = read_header_u32_le(&bytes, 20..24)?;
-        let computed_crc = crc32_bytes(bytes.get(0..20).ok_or(StorageError::InvalidHeader)?);
+        let ui_state_len = read_header_u32_le(&bytes, 16..20)?;
+        let ui_state_crc = read_header_u32_le(&bytes, 20..24)?;
+        let sequence = read_header_u32_le(&bytes, 24..28)?;
+        let header_crc = read_header_u32_le(&bytes, 28..32)?;
+        let computed_crc = crc32_bytes(bytes.get(0..28).ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?);
         if computed_crc != header_crc {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         if version != HEADER_VERSION {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         let capacity_words = self
             .program_capacity_words(slot)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         let program_words_usize =
-            usize::try_from(program_words).map_err(|_| StorageError::InvalidHeader)?;
+            usize::try_from(program_words).map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?;
         if program_words_usize > capacity_words {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
+        let ui_state_len_usize =
+            usize::try_from(ui_state_len).map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?;
         let program_start = self.program_start_addr(slot)?;
         let program_len = program_words_usize
             .checked_mul(WORD_SIZE_BYTES)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         let program_end = program_start
             .checked_add(program_len)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         let slot_end = self.slot_end_addr(slot)?;
         if program_end > slot_end {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
+        }
+        let ui_capacity = self.ui_state_capacity_bytes(slot, program_words_usize)?;
+        if ui_state_len_usize > ui_capacity {
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         Ok(StorageHeader {
             version,
             program_words,
             program_crc,
+            ui_state_len,
+            ui_state_crc,
             sequence,
             header_crc,
         })
@@ -360,17 +469,17 @@ impl<F: NorFlash> FlashStorage<F> {
         let storage_len = self
             .storage_end
             .checked_sub(self.storage_start)
-            .ok_or(StorageError::InvalidHeader)?;
+            .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?;
         if storage_len < HEADER_SIZE_BYTES || self.slot_len < HEADER_SIZE_BYTES {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         Ok(storage_len)
     }
 
     fn flash_erase_range(&mut self, start: u32, len: usize) -> Result<(), StorageError> {
         let end = start
-            .checked_add(u32::try_from(len).map_err(|_| StorageError::ProgramTooLarge)?)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .checked_add(u32::try_from(len).map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         self.flash
             .erase(start, end)
             .map_err(map_flash_error)?;
@@ -379,14 +488,14 @@ impl<F: NorFlash> FlashStorage<F> {
 
     fn flash_program_words(&mut self, start: u32, program: &[Word]) -> Result<(), StorageError> {
         if start as usize % F::WRITE_SIZE != 0 {
-            return Err(StorageError::UnalignedWrite);
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
         }
         let byte_len = program
             .len()
             .checked_mul(WORD_SIZE_BYTES)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         if byte_len % F::WRITE_SIZE != 0 {
-            return Err(StorageError::UnalignedWrite);
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
         }
         let mut offset = start;
         for &word in program {
@@ -396,7 +505,43 @@ impl<F: NorFlash> FlashStorage<F> {
                 .map_err(map_flash_error)?;
             offset = offset
                 .checked_add(WORD_SIZE_BYTES as u32)
-                .ok_or(StorageError::ProgramTooLarge)?;
+                .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        }
+        Ok(())
+    }
+
+    fn flash_program_bytes(
+        &mut self,
+        start: u32,
+        bytes: &[u8],
+        allow_pad: bool,
+    ) -> Result<(), StorageError> {
+        if start as usize % F::WRITE_SIZE != 0 {
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
+        }
+        if F::WRITE_SIZE > MAX_WRITE_BUFFER {
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
+        }
+        let mut offset = start;
+        let mut idx = 0usize;
+        while idx < bytes.len() {
+            let remaining = bytes.len() - idx;
+            let chunk_len = remaining.min(F::WRITE_SIZE);
+            if chunk_len < F::WRITE_SIZE && !allow_pad {
+                return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
+            }
+            let mut buf = [0xFFu8; MAX_WRITE_BUFFER];
+            buf[..chunk_len].copy_from_slice(&bytes[idx..idx + chunk_len]);
+            let write_buf = &buf[..F::WRITE_SIZE];
+            self.flash
+                .write(offset, write_buf)
+                .map_err(map_flash_error)?;
+            offset = offset
+                .checked_add(u32::try_from(F::WRITE_SIZE).map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?)
+                .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+            idx = idx
+                .checked_add(chunk_len)
+                .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         }
         Ok(())
     }
@@ -406,9 +551,17 @@ impl<F: NorFlash> FlashStorage<F> {
         storage_start: u32,
         program_words: usize,
         program_crc: u32,
+        ui_state_len: u32,
+        ui_state_crc: u32,
         sequence: u32,
     ) -> Result<(), StorageError> {
-        let header_words = encode_header(program_words, program_crc, sequence)?;
+        let header_words = encode_header(
+            program_words,
+            program_crc,
+            ui_state_len,
+            ui_state_crc,
+            sequence,
+        )?;
         self.flash_program_words(storage_start, &header_words)
     }
 }
@@ -417,32 +570,56 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
     type L = FlashProgramLoader;
 
     /// `size` is in instruction count (words).
-    fn get_program_loader(&mut self, size: u32) -> Result<Self::L, StorageError> {
-        let size_words: usize = size.try_into().map_err(|_| StorageError::ProgramTooLarge)?;
+    fn get_program_loader(
+        &mut self,
+        size: u32,
+        ui_state_size: u32,
+    ) -> Result<Self::L, StorageError> {
+        let size_words: usize =
+            size.try_into().map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        let ui_state_size: usize =
+            ui_state_size.try_into().map_err(|_| StorageError::new(StorageErrorKind::UiStateTooLarge))?;
         let target_slot = self.inactive_slot();
         let capacity_words = self
             .program_capacity_words(target_slot)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         if size_words > capacity_words {
-            return Err(StorageError::ProgramTooLarge);
+            return Err(StorageError::new(StorageErrorKind::ProgramTooLarge));
         }
 
         let byte_len = size_words
             .checked_mul(WORD_SIZE_BYTES)
-            .ok_or(StorageError::ProgramTooLarge)?;
-        let total_len = byte_len
-            .checked_add(HEADER_SIZE_BYTES)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        let ui_storage_len = align_up(ui_state_size, F::WRITE_SIZE)?;
+        let ui_start_offset = align_up(
+            HEADER_SIZE_BYTES
+                .checked_add(byte_len)
+                .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?,
+            F::WRITE_SIZE,
+        )?;
+        let total_len = ui_start_offset
+            .checked_add(ui_storage_len)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        if total_len > self.slot_len {
+            return Err(StorageError::new(StorageErrorKind::UiStateTooLarge));
+        }
         let erase_len = align_up(total_len, F::ERASE_SIZE)?;
 
         let slot_offset = self.slot_offset(target_slot)?;
         self.flash_erase_range(slot_offset, erase_len)?;
         let program_offset = slot_offset
             .checked_add(HEADER_SIZE_BYTES as u32)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        let ui_offset = slot_offset
+            .checked_add(
+                u32::try_from(ui_start_offset).map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?,
+            )
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         Ok(FlashProgramLoader::new(
             program_offset,
             size_words,
+            ui_offset,
+            ui_state_size,
             self.active_sequence.wrapping_add(1),
             target_slot,
         ))
@@ -455,23 +632,23 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
         block: &[Word],
     ) -> Result<(), StorageError> {
         if block_number != loader.next_block {
-            return Err(StorageError::UnexpectedBlock);
+            return Err(StorageError::new(StorageErrorKind::UnexpectedBlock));
         }
 
         let Some(end_word) = loader.next_word.checked_add(block.len()) else {
-            return Err(StorageError::ProgramTooLarge);
+            return Err(StorageError::new(StorageErrorKind::ProgramTooLarge));
         };
         if end_word > loader.program_words {
-            return Err(StorageError::ProgramTooLarge);
+            return Err(StorageError::new(StorageErrorKind::ProgramTooLarge));
         }
 
         let offset = loader
             .program_start
             .checked_add(
                 u32::try_from(loader.next_word * WORD_SIZE_BYTES)
-                    .map_err(|_| StorageError::ProgramTooLarge)?,
+                    .map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?,
             )
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         self.flash_program_words(offset, block)?;
         for &word in block {
             loader.program_crc = crc32_update(loader.program_crc, &word.to_le_bytes());
@@ -481,19 +658,68 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
         loader.next_block = loader
             .next_block
             .checked_add(1)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        Ok(())
+    }
+
+    fn add_ui_block(
+        &mut self,
+        loader: &mut Self::L,
+        block_number: u32,
+        block: &[u8],
+    ) -> Result<(), StorageError> {
+        if block_number != loader.next_ui_block {
+            return Err(StorageError::new(StorageErrorKind::UnexpectedBlock));
+        }
+        let Some(end_byte) = loader.next_ui_offset.checked_add(block.len()) else {
+            return Err(StorageError::new(StorageErrorKind::UiStateTooLarge));
+        };
+        if end_byte > loader.ui_state_len {
+            return Err(StorageError::new(StorageErrorKind::UiStateTooLarge));
+        }
+        let offset = loader
+            .ui_state_start
+            .checked_add(
+                u32::try_from(loader.next_ui_offset).map_err(|_| StorageError::new(StorageErrorKind::UiStateTooLarge))?,
+            )
+            .ok_or(StorageError::new(StorageErrorKind::UiStateTooLarge))?;
+        let is_last = end_byte == loader.ui_state_len;
+        if !is_last && block.len() % F::WRITE_SIZE != 0 {
+            return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
+        }
+        self.flash_program_bytes(offset, block, is_last)?;
+        for &byte in block {
+            loader.ui_state_crc = crc32_update(loader.ui_state_crc, &[byte]);
+        }
+        loader.next_ui_offset = end_byte;
+        loader.next_ui_block = loader
+            .next_ui_block
+            .checked_add(1)
+            .ok_or(StorageError::new(StorageErrorKind::UiStateTooLarge))?;
         Ok(())
     }
 
     fn finish_load(&mut self, loader: Self::L) -> Result<ProgramNumber, StorageError> {
         let program_words = loader.program_words;
         if loader.next_word != program_words {
-            return Err(StorageError::InvalidHeader);
+            return Err(StorageError::new(StorageErrorKind::ProgramIncomplete));
+        }
+        if loader.next_ui_offset != loader.ui_state_len {
+            return Err(StorageError::new(StorageErrorKind::UiStateIncomplete));
         }
         let program_crc = crc32_finalize(loader.program_crc);
+        let ui_state_crc = crc32_finalize(loader.ui_state_crc);
         let slot_offset = self.slot_offset(loader.target_slot)?;
-        self.flash_program_header(slot_offset, program_words, program_crc, loader.sequence)?;
+        self.flash_program_header(
+            slot_offset,
+            program_words,
+            program_crc,
+            loader.ui_state_len as u32,
+            ui_state_crc,
+            loader.sequence,
+        )?;
         self.program_words = program_words;
+        self.ui_state_len = loader.ui_state_len;
         self.active_slot = loader.target_slot;
         self.active_sequence = loader.sequence;
         Ok(ProgramNumber::new(0))
@@ -505,11 +731,53 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
         globals: &'b mut [Word],
     ) -> Result<Program<'a, 'b>, StorageError> {
         if program_number.value() != 0 {
-            return Err(StorageError::UnknownProgram);
+            return Err(StorageError::new(StorageErrorKind::UnknownProgram));
         }
 
         let program = self.program_slice();
-        Program::new(program, globals).map_err(StorageError::InvalidProgram)
+        Program::new(program, globals).map_err(StorageError::invalid_program)
+    }
+
+    fn get_ui_state_len(&mut self, program_number: ProgramNumber) -> Result<u32, StorageError> {
+        if program_number.value() != 0 {
+            return Err(StorageError::new(StorageErrorKind::UnknownProgram));
+        }
+        Ok(self.ui_state_len as u32)
+    }
+
+    fn read_ui_state_block(
+        &mut self,
+        program_number: ProgramNumber,
+        offset: u32,
+        out: &mut [u8],
+    ) -> Result<usize, StorageError> {
+        if program_number.value() != 0 {
+            return Err(StorageError::new(StorageErrorKind::UnknownProgram));
+        }
+        let offset_usize: usize =
+            offset.try_into().map_err(|_| StorageError::new(StorageErrorKind::UiStateReadOutOfBounds))?;
+        if offset_usize >= self.ui_state_len {
+            return Ok(0);
+        }
+        let remaining = self.ui_state_len - offset_usize;
+        let to_read = remaining.min(out.len());
+        if to_read == 0 {
+            return Ok(0);
+        }
+        let ui_start = self.ui_state_start_offset(self.active_slot, self.program_words)?;
+        let flash_offset = ui_start
+            .checked_add(
+                u32::try_from(offset_usize)
+                    .map_err(|_| StorageError::new(StorageErrorKind::UiStateReadOutOfBounds))?,
+            )
+            .ok_or(StorageError::new(StorageErrorKind::UiStateReadOutOfBounds))?;
+        self.flash
+            .read(
+                flash_offset,
+                &mut out[..to_read],
+            )
+            .map_err(map_flash_error)?;
+        Ok(to_read)
     }
 }
 
@@ -519,18 +787,35 @@ pub struct FlashProgramLoader {
     next_block: u32,
     next_word: usize,
     program_crc: u32,
+    ui_state_start: u32,
+    ui_state_len: usize,
+    next_ui_block: u32,
+    next_ui_offset: usize,
+    ui_state_crc: u32,
     sequence: u32,
     target_slot: usize,
 }
 
 impl FlashProgramLoader {
-    fn new(program_start: u32, program_words: usize, sequence: u32, target_slot: usize) -> Self {
+    fn new(
+        program_start: u32,
+        program_words: usize,
+        ui_state_start: u32,
+        ui_state_len: usize,
+        sequence: u32,
+        target_slot: usize,
+    ) -> Self {
         Self {
             program_start,
             program_words,
             next_block: 0,
             next_word: 0,
             program_crc: crc32_init(),
+            ui_state_start,
+            ui_state_len,
+            next_ui_block: 0,
+            next_ui_offset: 0,
+            ui_state_crc: crc32_init(),
             sequence,
             target_slot,
         }
@@ -541,6 +826,8 @@ struct StorageHeader {
     version: u32,
     program_words: u32,
     program_crc: u32,
+    ui_state_len: u32,
+    ui_state_crc: u32,
     sequence: u32,
     header_crc: u32,
 }
@@ -557,46 +844,56 @@ fn storage_bounds() -> (usize, usize) {
 fn encode_header(
     program_words: usize,
     program_crc: u32,
+    ui_state_len: u32,
+    ui_state_crc: u32,
     sequence: u32,
 ) -> Result<[Word; HEADER_WORDS], StorageError> {
-    let program_words = u32::try_from(program_words).map_err(|_| StorageError::ProgramTooLarge)?;
+    let program_words = u32::try_from(program_words).map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?;
     let mut bytes = [0u8; HEADER_SIZE_BYTES];
     bytes
         .get_mut(0..4)
-        .ok_or(StorageError::ProgramTooLarge)?
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
         .copy_from_slice(&HEADER_MAGIC.to_le_bytes());
     bytes
         .get_mut(4..8)
-        .ok_or(StorageError::ProgramTooLarge)?
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
         .copy_from_slice(&HEADER_VERSION.to_le_bytes());
     bytes
         .get_mut(8..12)
-        .ok_or(StorageError::ProgramTooLarge)?
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
         .copy_from_slice(&program_words.to_le_bytes());
     bytes
         .get_mut(12..16)
-        .ok_or(StorageError::ProgramTooLarge)?
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
         .copy_from_slice(&program_crc.to_le_bytes());
     bytes
         .get_mut(16..20)
-        .ok_or(StorageError::ProgramTooLarge)?
-        .copy_from_slice(&sequence.to_le_bytes());
-    let header_crc = crc32_bytes(bytes.get(0..20).ok_or(StorageError::ProgramTooLarge)?);
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
+        .copy_from_slice(&ui_state_len.to_le_bytes());
     bytes
         .get_mut(20..24)
-        .ok_or(StorageError::ProgramTooLarge)?
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
+        .copy_from_slice(&ui_state_crc.to_le_bytes());
+    bytes
+        .get_mut(24..28)
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
+        .copy_from_slice(&sequence.to_le_bytes());
+    let header_crc = crc32_bytes(bytes.get(0..28).ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?);
+    bytes
+        .get_mut(28..32)
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?
         .copy_from_slice(&header_crc.to_le_bytes());
     let mut words = [0u16; HEADER_WORDS];
     for (idx, chunk) in bytes.chunks_exact(WORD_SIZE_BYTES).enumerate() {
-        let word_bytes = chunk.get(0..2).ok_or(StorageError::ProgramTooLarge)?;
+        let word_bytes = chunk.get(0..2).ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         let word = u16::from_le_bytes(
             word_bytes
                 .try_into()
-                .map_err(|_| StorageError::ProgramTooLarge)?,
+                .map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?,
         );
         let slot = words
             .get_mut(idx)
-            .ok_or(StorageError::ProgramTooLarge)?;
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         *slot = word;
     }
     Ok(words)
@@ -641,19 +938,19 @@ fn crc32_finalize(crc: u32) -> u32 {
 fn read_header_u32_le(bytes: &[u8], range: core::ops::Range<usize>) -> Result<u32, StorageError> {
     let chunk = bytes
         .get(range)
-        .ok_or(StorageError::InvalidHeader)?
+        .ok_or(StorageError::new(StorageErrorKind::InvalidHeader))?
         .try_into()
-        .map_err(|_| StorageError::InvalidHeader)?;
+        .map_err(|_| StorageError::new(StorageErrorKind::InvalidHeader))?;
     Ok(u32::from_le_bytes(chunk))
 }
 
 fn align_up(value: usize, align: usize) -> Result<usize, StorageError> {
     let mask = align
         .checked_sub(1)
-        .ok_or(StorageError::ProgramTooLarge)?;
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
     let value = value
         .checked_add(mask)
-        .ok_or(StorageError::ProgramTooLarge)?;
+        .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
     Ok(value & !mask)
 }
 
@@ -663,10 +960,10 @@ fn is_seq_newer(candidate: u32, current: u32) -> bool {
 
 fn map_flash_error<E: NorFlashError>(error: E) -> StorageError {
     match error.kind() {
-        NorFlashErrorKind::NotAligned => StorageError::UnalignedWrite,
-        NorFlashErrorKind::OutOfBounds => StorageError::ProgramTooLarge,
-        NorFlashErrorKind::Other => StorageError::WriteFailed,
-        _ => StorageError::WriteFailed,
+        NorFlashErrorKind::NotAligned => StorageError::new(StorageErrorKind::UnalignedWrite),
+        NorFlashErrorKind::OutOfBounds => StorageError::new(StorageErrorKind::ProgramTooLarge),
+        NorFlashErrorKind::Other => StorageError::new(StorageErrorKind::WriteFailed),
+        _ => StorageError::new(StorageErrorKind::WriteFailed),
     }
 }
 
@@ -835,12 +1132,15 @@ mod tests {
         let mut storage = make_storage();
         storage.format().expect("format");
 
-        let mut loader = storage.get_program_loader(4).expect("loader");
+        let mut loader = storage.get_program_loader(4, 0).expect("loader");
         storage
             .add_block(&mut loader, 0, &[0xAAAAu16, 0xBBBB])
             .expect("block");
 
-        assert!(matches!(storage.finish_load(loader), Err(StorageError::InvalidHeader)));
+        assert!(matches!(
+            storage.finish_load(loader),
+            Err(err) if err.kind() == StorageErrorKind::ProgramIncomplete
+        ));
     }
 
     #[test]
@@ -854,7 +1154,7 @@ mod tests {
         let prev_slot = storage.active_slot;
         let prev_seq = storage.active_sequence;
 
-        let mut loader = storage.get_program_loader(4).expect("loader");
+        let mut loader = storage.get_program_loader(4, 0).expect("loader");
         storage
             .add_block(&mut loader, 0, &[0xAAAAu16, 0xBBBB])
             .expect("block");
