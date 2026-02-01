@@ -449,13 +449,11 @@ impl<F: NorFlash> FlashStorage<F> {
             return Err(StorageError::new(StorageErrorKind::InvalidHeader));
         }
         Ok(StorageHeader {
-            version,
             program_words,
             program_crc,
             ui_state_len,
             ui_state_crc,
             sequence,
-            header_crc,
         })
     }
 
@@ -823,13 +821,11 @@ impl FlashProgramLoader {
 }
 
 struct StorageHeader {
-    version: u32,
     program_words: u32,
     program_crc: u32,
     ui_state_len: u32,
     ui_state_crc: u32,
     sequence: u32,
-    header_crc: u32,
 }
 
 fn storage_bounds() -> (usize, usize) {
