@@ -375,7 +375,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
         stack.push(0).unwrap();
         stack.push(0).unwrap();
         let (r, g, b) =
-            pliot.get_led_color(machine_index as ProgramWord, 0, 0, &mut stack)?;
+            pliot.get_led_color(machine_index as ProgramWord, 0, 0u32, &mut stack)?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -392,7 +392,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
                 stack.push(0).unwrap();
                 stack.push(0).unwrap();
                 stack.push(0).unwrap();
-                pliot.get_led_color(machine_index, j, i, &mut stack)?;
+                pliot.get_led_color(machine_index, j, i as u32, &mut stack)?;
             }
         }
     }

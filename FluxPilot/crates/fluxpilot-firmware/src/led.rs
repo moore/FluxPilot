@@ -37,7 +37,7 @@ pub async fn led_loop<
     W: SmartLedsWrite<Color = RGB8>,
     S: pliot::Storage,
 {
-    let mut tick = 0u16;
+    let mut tick = 0u32;
     loop {
         let start_time = Instant::now();
         {

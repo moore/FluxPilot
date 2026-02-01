@@ -511,7 +511,7 @@ impl<
         &mut self,
         machine_number: ProgramWord,
         index: u16,
-        tick: u16,
+        tick: u32,
         stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(u8, u8, u8), PliotError> {
         let progroam_unmber = ProgramNumber(0);

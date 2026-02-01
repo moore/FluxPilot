@@ -243,7 +243,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
         stack.push(0).unwrap();
         stack.push(0).unwrap();
         let (r, g, b) =
-            program.get_led_color(machine_index as ProgramWord, 0, 0, &mut stack)?;
+            program.get_led_color(machine_index as ProgramWord, 0, 0u32, &mut stack)?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -260,7 +260,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
                 stack.push(0).unwrap();
                 stack.push(0).unwrap();
                 stack.push(0).unwrap();
-                program.get_led_color(machine_index as ProgramWord, j as u16, i as u16, &mut stack)?;
+                program.get_led_color(machine_index as ProgramWord, j as u16, i as u32, &mut stack)?;
             
             }
         }
@@ -316,7 +316,7 @@ fn test_init_get_color() -> Result<(), MachineError> {
         stack.push(0).unwrap();
         stack.push(0).unwrap();
         let (r, g, b) = program
-            .get_led_color(0, 31337, 17, &mut stack)
+            .get_led_color(0, 31337, 17u32, &mut stack)
             .expect("Could not get led color");
 
         println!("stack is {:?}", stack);
@@ -379,7 +379,7 @@ fn test_init_get_color2() -> Result<(), MachineError> {
         stack.push(0).unwrap();
         stack.push(0).unwrap();
         let (r, g, b) = program
-            .get_led_color(0, 31337, 1, &mut stack)
+            .get_led_color(0, 31337, 1u32, &mut stack)
             .expect("Could not get led color");
 
         println!("stack is {:?}", stack);
@@ -394,7 +394,7 @@ fn test_init_get_color2() -> Result<(), MachineError> {
         stack.push(0).unwrap();
         stack.push(0).unwrap();
         let (r, g, b) = program
-            .get_led_color(0, 31337, 30, &mut stack)
+            .get_led_color(0, 31337, 30u32, &mut stack)
             .expect("Could not get led color");
 
         println!("stack is {:?}", stack);

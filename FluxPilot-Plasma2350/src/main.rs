@@ -347,9 +347,9 @@ async fn led_loop_pio<
     P: embassy_rp::pio::Instance,
     S: pliot::Storage,
 {
-    let tick: u16 = 0u16;
     loop {
         let start_time = Instant::now();
+        let tick = Instant::now().as_millis() as u32;
         {
             let mut guard = shared.lock().await;
             let PliotShared { pliot, stack } = &mut *guard;
@@ -382,7 +382,6 @@ async fn led_loop_pio<
                 if !seed_stack(stack, red, green, blue) {
                     continue;
                 }
-                let tick = Instant::now().as_millis() as u16;
                 for machine_number in 0..machine_count {
                     match pliot.get_led_color(machine_number, i as u16, tick, stack) {
                         Ok((next_red, next_green, next_blue)) => {
