@@ -23,7 +23,7 @@ pub mod meme_storage;
 pub mod protocol;
 
 use heapless::Vec;
-use light_machine::{MachineError, Program, Word};
+use light_machine::{MachineError, Program, ProgramWord, StackWord};
 use postcard::from_bytes_cobs;
 use protocol::{ErrorLocation, Protocol, FunctionId, ErrorType};
 use thiserror_no_std::Error;
@@ -149,7 +149,7 @@ pub trait Storage {
         &mut self,
         loader: &mut Self::L,
         block_number: u32,
-        block: &[Word],
+        block: &[ProgramWord],
     ) -> Result<(), StorageError>;
     fn add_ui_block(
         &mut self,
@@ -161,7 +161,7 @@ pub trait Storage {
     fn get_program<'a, 'b>(
         &'a mut self,
         program_number: ProgramNumber,
-        globals: &'b mut [Word],
+        globals: &'b mut [ProgramWord],
     ) -> Result<Program<'a, 'b>, StorageError>;
     fn get_ui_state_len(&mut self, program_number: ProgramNumber) -> Result<u32, StorageError>;
     fn read_ui_state_block(
@@ -196,7 +196,7 @@ pub struct Pliot<
     S: Storage,
 > {
     storage: &'a mut S,
-    memory: &'b mut [Word],
+    memory: &'b mut [ProgramWord],
     loader: Option<CurrentLoader<S>>,
 }
 
@@ -210,7 +210,7 @@ impl<
     S: Storage,
 > Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, S>
 {
-    pub fn new<'c: 'a, 'd: 'b>(storage: &'a mut S, memory: &'b mut [Word]) -> Self {
+    pub fn new<'c: 'a, 'd: 'b>(storage: &'a mut S, memory: &'b mut [ProgramWord]) -> Self {
         Self {
             storage,
             memory,
@@ -218,7 +218,10 @@ impl<
         }
     }
 
-    pub fn init<const STACK_SIZE: usize>(&mut self, stack: &mut Vec<Word, STACK_SIZE>) -> Result<(), PliotError> {
+    pub fn init<const STACK_SIZE: usize>(
+        &mut self,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
+    ) -> Result<(), PliotError> {
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
         let machine_count = program.machine_count()?;
@@ -229,7 +232,7 @@ impl<
         Ok(())
     }
 
-    pub fn machine_count(&mut self) -> Result<Word, PliotError> {
+    pub fn machine_count(&mut self) -> Result<ProgramWord, PliotError> {
         let progroam_unmber = ProgramNumber(0);
         let program = self.storage.get_program(progroam_unmber, self.memory)?;
         Ok(program.machine_count()?)
@@ -238,7 +241,7 @@ impl<
 
     pub fn process_message<const STACK_SIZE: usize>(
         &mut self,
-        stack: &mut Vec<Word, STACK_SIZE>,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
         in_buff: &mut [u8],
         out_buff: &mut [u8],
     ) -> Result<usize, PliotError> {
@@ -473,7 +476,12 @@ impl<
     }
 
 
-    pub fn call<const STACK_SIZE: usize>(&mut self, stack: &mut Vec<Word, STACK_SIZE>, function: FunctionId, args: &Vec<Word, MAX_ARGS>) -> Result<Vec<Word, MAX_RESULT>, PliotError> {
+    pub fn call<const STACK_SIZE: usize>(
+        &mut self,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
+        function: FunctionId,
+        args: &Vec<StackWord, MAX_ARGS>,
+    ) -> Result<Vec<StackWord, MAX_RESULT>, PliotError> {
         let Ok(function_index) = function.function_index.try_into() else {
             return Err(PliotError::FunctionIndexOutOfRange);
         };
@@ -494,17 +502,17 @@ impl<
             return Err(PliotError::ResultTooLarge);
         }
 
-        let results: Vec<Word, MAX_RESULT> = stack.into_iter().map(|i| *i).collect();
+        let results: Vec<StackWord, MAX_RESULT> = stack.into_iter().map(|i| *i).collect();
 
        Ok(results)
     }
 
    pub fn get_led_color<const STACK_SIZE: usize>(
         &mut self,
-        machine_number: Word,
+        machine_number: ProgramWord,
         index: u16,
         tick: u16,
-        stack: &mut Vec<Word, STACK_SIZE>,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(u8, u8, u8), PliotError> {
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;

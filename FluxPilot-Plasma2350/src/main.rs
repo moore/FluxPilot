@@ -25,7 +25,7 @@ use static_cell::StaticCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 use smart_leds::RGB8;
 
-use light_machine::Word;
+use light_machine::StackWord;
 use fluxpilot_firmware::program::default_program;
 use fluxpilot_firmware::usb_io::{io_loop, PliotShared};
 use fluxpilot_firmware::usb_vendor::{VendorClass, VendorReceiver, VendorSender};
@@ -360,16 +360,16 @@ async fn led_loop_pio<
                 }
             };
             let seed_stack =
-                |stack: &mut Vec<Word, STACK_SIZE>, red: u8, green: u8, blue: u8| -> bool {
+                |stack: &mut Vec<StackWord, STACK_SIZE>, red: u8, green: u8, blue: u8| -> bool {
                     stack.clear();
-                    if stack.push(red as Word).is_err() {
+                    if stack.push(red as StackWord).is_err() {
                         return false;
                     }
-                    if stack.push(green as Word).is_err() {
+                    if stack.push(green as StackWord).is_err() {
                         stack.clear();
                         return false;
                     }
-                    if stack.push(blue as Word).is_err() {
+                    if stack.push(blue as StackWord).is_err() {
                         stack.clear();
                         return false;
                     }

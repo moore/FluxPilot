@@ -19,7 +19,7 @@
 )]
 #![cfg_attr(not(test), warn(clippy::missing_panics_doc))]
 
-use core::mem::transmute;
+use core::mem::{transmute, size_of};
 use heapless::Vec;
 use thiserror_no_std::Error;
 use variant_count::VariantCount;
@@ -34,9 +34,9 @@ mod assembler_test;
 /// This module implments the vitural machine for FluxPilot.
 /// A machine takes three memory regions when it is initilized:
 /// `
-///     static_data: &'a [Word],
-///     globals: &'b mut [Word],
-///     program: &'c [Word],
+///     static_data: &'a [ProgramWord],
+///     globals: &'b mut [ProgramWord],
+///     program: &'c [ProgramWord],
 /// `
 /// The `static_data` is used to hold any constancs that the machine
 /// program needs. The `globals`` holds any mutibal state that needs
@@ -52,22 +52,28 @@ mod assembler_test;
 /// initlises the `globals` for the machine as well as a entry point for
 /// the main function.
 ///
-/// It is a stack based vitural machine where all opps and
-/// values are u16. This allow the mixture of instructions
-/// and program data in the program section and allows the
-/// stack to have a single type.
-pub type Word = u16;
+/// It is a stack based vitural machine where all program words
+/// are u16 but stack values are u32. This allow the mixture of
+/// instructions and program data in the program section while
+/// expanding the runtime arithmetic domain.
+pub type ProgramWord = u16;
+pub type StackWord = u32;
 
-fn get_mut_or<E>(slice: &mut [Word], index: usize, err: E) -> Result<&mut Word, E> {
+fn get_mut_or<E>(slice: &mut [ProgramWord], index: usize, err: E) -> Result<&mut ProgramWord, E> {
     slice.get_mut(index).ok_or(err)
 }
 
-fn set_value<E>(slice: &mut [Word], index: usize, value: Word, err: E) -> Result<(), E> {
+fn set_value<E>(
+    slice: &mut [ProgramWord],
+    index: usize,
+    value: ProgramWord,
+    err: E,
+) -> Result<(), E> {
     *get_mut_or(slice, index, err)? = value;
     Ok(())
 }
 
-#[repr(u16)] // Must match Word
+#[repr(u16)] // Must match ProgramWord
 #[derive(VariantCount, Debug)]
 pub enum Ops {
     Pop,
@@ -103,15 +109,15 @@ pub enum Ops {
     Return,
 }
 
-impl From<Ops> for Word {
-    fn from(op: Ops) -> Word {
-        op as Word
+impl From<Ops> for ProgramWord {
+    fn from(op: Ops) -> ProgramWord {
+        op as ProgramWord
     }
 }
 
-impl TryFrom<Word> for Ops {
+impl TryFrom<ProgramWord> for Ops {
     type Error = MachineError;
-    fn try_from(value: Word) -> Result<Self, Self::Error> {
+    fn try_from(value: ProgramWord) -> Result<Self, Self::Error> {
         // SAFTY: we require Ops to be in range of u16
         // with `repr` macro.
         if value >= Ops::VARIANT_COUNT as u16 {
@@ -119,7 +125,7 @@ impl TryFrom<Word> for Ops {
         }
 
         // SAFTY: We just check that the value is in range.
-        let op = unsafe { transmute::<Word, Self>(value) };
+        let op = unsafe { transmute::<ProgramWord, Self>(value) };
         Ok(op)
     }
 }
@@ -131,7 +137,7 @@ pub enum MachineError {
     #[error("the value {0} is out of the globals bounds")]
     OutOfBoundsGlobalsAccess(usize),
     #[error("the value {0} is an invalid opcode")]
-    InvalidOp(Word),
+    InvalidOp(ProgramWord),
     #[error("the pop op code was executed on an empty stack")]
     PopOnEmptyStack,
     #[error("attempted opperation would overflow the stack")]
@@ -141,13 +147,17 @@ pub enum MachineError {
     #[error("there are not enogh arguments to call the function")]
     TwoFewArguments,
     #[error("word {0} out of range of color value")]
-    ColorOutOfRange(Word),
+    ColorOutOfRange(StackWord),
     #[error("indesx {0} out of range of static data")]
     OutOfBoudsStaticRead(usize),
     #[error("index {0} out of range of static data")]
-    GlobalsBufferTooSmall(Word),
+    GlobalsBufferTooSmall(ProgramWord),
     #[error("index {0} out of range for machine index")]
-    MachineIndexOutOfRange(Word),
+    MachineIndexOutOfRange(ProgramWord),
+    #[error("stack value {0} does not fit in a program word")]
+    StackValueTooLargeForProgramWord(StackWord),
+    #[error("stack value {0} does not fit in usize")]
+    StackValueTooLargeForUsize(StackWord),
 }
 
 pub const MACHINE_COUNT_OFFSET: usize = 0;
@@ -214,13 +224,16 @@ impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> Default
 }
 
 pub struct Program<'a, 'b> {
-    static_data: &'a [Word],
-    globals: &'b mut [Word],
-    frame_pointer: Word,
+    static_data: &'a [ProgramWord],
+    globals: &'b mut [ProgramWord],
+    frame_pointer: StackWord,
 }
 
 impl<'a, 'b> Program<'a, 'b> {
-    pub fn new(static_data: &'a [Word], globals: &'b mut [Word]) -> Result<Self, MachineError> {
+    pub fn new(
+        static_data: &'a [ProgramWord],
+        globals: &'b mut [ProgramWord],
+    ) -> Result<Self, MachineError> {
         let Some(globals_size) = static_data.get(GLOBALS_SIZE_OFFSET) else {
             return Err(MachineError::OutOfBoudsStaticRead(GLOBALS_SIZE_OFFSET));
         };
@@ -237,7 +250,7 @@ impl<'a, 'b> Program<'a, 'b> {
     }
 
 
-    pub fn machine_count(&self) -> Result<Word, MachineError> {
+    pub fn machine_count(&self) -> Result<ProgramWord, MachineError> {
         let Some(count) = self.static_data.get(MACHINE_COUNT_OFFSET) else {
             return Err(MachineError::OutOfBoudsStaticRead(MACHINE_COUNT_OFFSET));
         };
@@ -247,7 +260,7 @@ impl<'a, 'b> Program<'a, 'b> {
 
     fn get_function_entry(
         &self,
-        machine_number: Word,
+        machine_number: ProgramWord,
         function_number: usize,
     ) -> Result<usize, MachineError> {
         if machine_number > self.machine_count()? {
@@ -270,8 +283,8 @@ impl<'a, 'b> Program<'a, 'b> {
 
     pub fn init_machine<const STACK_SIZE: usize>(
         &mut self,
-        machine_number: Word,
-        stack: &mut Vec<Word, STACK_SIZE>,
+        machine_number: ProgramWord,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let entry_point = self.get_function_entry(machine_number, INIT_OFFSET)?;
         self.run(machine_number, entry_point, stack)?;
@@ -280,16 +293,20 @@ impl<'a, 'b> Program<'a, 'b> {
 
     pub fn get_led_color<const STACK_SIZE: usize>(
         &mut self,
-        machine_number: Word,
+        machine_number: ProgramWord,
         index: u16,
         tick: u16,
-        stack: &mut Vec<Word, STACK_SIZE>,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(u8, u8, u8), MachineError> {
         if stack.len() < 3 {
             return Err(MachineError::TwoFewArguments);
         }
-        stack.push(index).map_err(|_| MachineError::StackOverflow)?;
-        stack.push(tick).map_err(|_| MachineError::StackOverflow)?;
+        stack
+            .push(StackWord::from(index))
+            .map_err(|_| MachineError::StackOverflow)?;
+        stack
+            .push(StackWord::from(tick))
+            .map_err(|_| MachineError::StackOverflow)?;
 
 
         let entry_point = self.get_function_entry(machine_number, GET_COLOR_OFFSET)?;
@@ -317,9 +334,9 @@ impl<'a, 'b> Program<'a, 'b> {
 
     pub fn call<const STACK_SIZE: usize>(
         &mut self,
-        machine_number: Word,
+        machine_number: ProgramWord,
         function_number: usize,
-        stack: &mut Vec<Word, STACK_SIZE>,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let entry_point = self.get_function_entry(machine_number, function_number)?;
 
@@ -329,9 +346,9 @@ impl<'a, 'b> Program<'a, 'b> {
 
     fn run<const STACK_SIZE: usize>(
         &mut self,
-        machine_number: Word,
+        machine_number: ProgramWord,
         entry_point: usize,
-        stack: &mut Vec<Word, STACK_SIZE>,
+        stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let mut pc = entry_point;
 
@@ -347,10 +364,10 @@ impl<'a, 'b> Program<'a, 'b> {
                 Ops::Push => {
                     pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
-                    push(stack, word)?;
+                    push(stack, program_word_to_stack(word))?;
                 }
                 Ops::BranchLessThan => {
-                    let target = pop(stack)? as usize;
+                    let target = stack_word_to_program_index(pop(stack)?)?;
                     let (lhs, rhs) = pop2(stack)?;
                     if lhs < rhs {
                         pc = target;
@@ -358,7 +375,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     }
                 }
                 Ops::BranchLessThanEq => {
-                    let target = pop(stack)? as usize;
+                    let target = stack_word_to_program_index(pop(stack)?)?;
                     let (lhs, rhs) = pop2(stack)?;
                     if lhs <= rhs {
                         pc = target;
@@ -366,7 +383,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     }
                 }
                 Ops::BranchGreaterThan => {
-                    let target = pop(stack)? as usize;
+                    let target = stack_word_to_program_index(pop(stack)?)?;
                     let (lhs, rhs) = pop2(stack)?;
                     if lhs > rhs {
                         pc = target;
@@ -374,7 +391,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     }
                 }
                 Ops::BranchGreaterThanEq => {
-                    let target = pop(stack)? as usize;
+                    let target = stack_word_to_program_index(pop(stack)?)?;
                     let (lhs, rhs) = pop2(stack)?;
                     if lhs >= rhs {
                         pc = target;
@@ -382,7 +399,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     }
                 }
                 Ops::BranchEqual => {
-                    let target = pop(stack)? as usize;
+                    let target = stack_word_to_program_index(pop(stack)?)?;
                     let (lhs, rhs) = pop2(stack)?;
                     if lhs == rhs {
                         pc = target;
@@ -456,26 +473,24 @@ impl<'a, 'b> Program<'a, 'b> {
                     let word = read_static(pc, self.static_data)?;
 
                     const {
-                        assert!(size_of::<Word>() <= size_of::<usize>());
+                        assert!(size_of::<ProgramWord>() <= size_of::<usize>());
                     }
                     // SAFTY: const assersion prouves this is safe
                     let index = word as usize;
 
                     let word = read_global(index, self.globals)?;
 
-                    push(stack, word)?;
+                    push(stack, program_word_to_stack(word))?;
                 }
                 Ops::Store => {
                     pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
 
-                    const {
-                        assert!(size_of::<Word>() <= size_of::<usize>());
-                    }
+                    const { assert!(size_of::<ProgramWord>() <= size_of::<usize>()) }
                     // SAFTY: const assersion prouves this is safe
                     let index = word as usize;
 
-                    let word = pop(stack)?;
+                    let word = stack_word_to_program(pop(stack)?)?;
 
                     set_value(
                         self.globals,
@@ -485,36 +500,38 @@ impl<'a, 'b> Program<'a, 'b> {
                     )?;
                 }
                 Ops::LoadStatic => {
-                    let addr = pop(stack)? as usize;
+                    let addr = stack_word_to_program_index(pop(stack)?)?;
                     let value = read_static(addr, self.static_data)?;
-                    push(stack, value)?;
+                    push(stack, program_word_to_stack(value))?;
                 }
                 Ops::Jump => {
-                    pc = pop(stack)? as usize;
+                    pc = stack_word_to_program_index(pop(stack)?)?;
                     continue;
                 }
                 Ops::StackLoad => {
                     pc = next_pc(pc)?;
                     let offset = read_static(pc, self.static_data)?;
-                    let index = self
-                        .frame_pointer
+                    let frame_pointer = stack_word_to_usize(self.frame_pointer)?;
+                    let offset = usize::from(offset);
+                    let index = frame_pointer
                         .checked_add(offset)
                         .ok_or(MachineError::StackUnderFlow)?;
                     let value = *stack
-                        .get(index as usize)
+                        .get(index)
                         .ok_or(MachineError::StackUnderFlow)?;
                     push(stack, value)?;
                 }
                 Ops::StackStore => {
                     pc = next_pc(pc)?;
                     let offset = read_static(pc, self.static_data)?;
-                    let index = self
-                        .frame_pointer
+                    let frame_pointer = stack_word_to_usize(self.frame_pointer)?;
+                    let offset = usize::from(offset);
+                    let index = frame_pointer
                         .checked_add(offset)
                         .ok_or(MachineError::StackUnderFlow)?;
                     let value = *stack.last().ok_or(MachineError::StackUnderFlow)?;
                     let slot = stack
-                        .get_mut(index as usize)
+                        .get_mut(index)
                         .ok_or(MachineError::StackUnderFlow)?;
                     *slot = value;
                     let _ = pop(stack)?;
@@ -534,8 +551,9 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::Call => {
                     // Stack convention: ... args, arg_count, func_index
-                    let function_index = pop(stack)? as usize;
-                    let arg_count = pop(stack)? as usize;
+                    let function_index =
+                        usize::from(stack_word_to_program(pop(stack)?)?);
+                    let arg_count = stack_word_to_usize(pop(stack)?)?;
                     let arg_start = stack
                         .len()
                         .checked_sub(arg_count)
@@ -543,7 +561,9 @@ impl<'a, 'b> Program<'a, 'b> {
                     // Save current frame pointer so the callee can access its caller frame.
                     let saved_frame_pointer = self.frame_pointer;
                     // Precompute return PC so it can be pushed ahead of the callee's args.
-                    let return_pc = next_pc(pc)? as Word;
+                    let return_pc = ProgramWord::try_from(next_pc(pc)?)
+                        .map_err(|_| MachineError::StackOverflow)?;
+                    let return_pc = program_word_to_stack(return_pc);
                     // Insert return PC before the first argument for this call frame layout:
                     // [return_pc, saved_fp, arg0, arg1, ...]
                     stack
@@ -560,23 +580,24 @@ impl<'a, 'b> Program<'a, 'b> {
                     let new_frame_pointer = arg_start
                         .checked_add(2)
                         .ok_or(MachineError::StackOverflow)?;
-                    // Convert usize->Word safely; Word limits keep stack indexing bounded.
+                    // Convert usize->StackWord safely; StackWord limits keep stack indexing bounded.
                     let new_frame_pointer =
-                        Word::try_from(new_frame_pointer).map_err(|_| MachineError::StackOverflow)?;
+                        StackWord::try_from(new_frame_pointer)
+                            .map_err(|_| MachineError::StackOverflow)?;
                     self.frame_pointer = new_frame_pointer;
                     let entry_point = self.get_function_entry(machine_number, function_index)?;
                     self.run(machine_number, entry_point, stack)?;
                     // Restore caller's frame pointer after returning.
                     self.frame_pointer = saved_frame_pointer;
-                    pc = return_pc as usize;
+                    pc = stack_word_to_program_index(return_pc)?;
                     continue;
                 }
                 Ops::Return => {
                     // Read the return count operand that follows RET.
                     pc = next_pc(pc)?;
-                    let return_count = read_static(pc, self.static_data)? as usize;
+                    let return_count = usize::from(read_static(pc, self.static_data)?);
                     // Compute frame metadata positions relative to the current frame pointer.
-                    let fp_index = usize::from(self.frame_pointer);
+                    let fp_index = stack_word_to_usize(self.frame_pointer)?;
                     let return_pc_index = fp_index
                         .checked_sub(2)
                         .ok_or(MachineError::StackUnderFlow)?;
@@ -619,7 +640,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     stack.truncate(new_len);
                     // Restore caller frame pointer and jump to saved return PC.
                     self.frame_pointer = saved_frame_pointer;
-                    pc = return_pc as usize;
+                    pc = stack_word_to_program_index(return_pc)?;
                     continue;
                 }
             }
@@ -635,14 +656,14 @@ fn next_pc(pc: usize) -> Result<usize, MachineError> {
         .ok_or(MachineError::OutOfBoudsStaticRead(pc)) // BUG: This should be OverFlowError
 }
 
-fn read_static(index: usize, program: &[Word]) -> Result<Word, MachineError> {
+fn read_static(index: usize, program: &[ProgramWord]) -> Result<ProgramWord, MachineError> {
     match program.get(index) {
         None => Err(MachineError::OutOfBoudsStaticRead(index)),
         Some(word) => Ok(*word),
     }
 }
 
-fn read_global(index: usize, globals: &[Word]) -> Result<Word, MachineError> {
+fn read_global(index: usize, globals: &[ProgramWord]) -> Result<ProgramWord, MachineError> {
     match globals.get(index) {
         None => Err(MachineError::OutOfBoundsGlobalsAccess(index)),
         Some(word) => Ok(*word),
@@ -650,22 +671,22 @@ fn read_global(index: usize, globals: &[Word]) -> Result<Word, MachineError> {
 }
 
 fn pop<const STACK_SIZE: usize>(
-    stack: &mut Vec<Word, STACK_SIZE>,
-) -> Result<Word, MachineError> {
+    stack: &mut Vec<StackWord, STACK_SIZE>,
+) -> Result<StackWord, MachineError> {
     stack.pop().ok_or(MachineError::StackUnderFlow)
 }
 
 fn pop2<const STACK_SIZE: usize>(
-    stack: &mut Vec<Word, STACK_SIZE>,
-) -> Result<(Word, Word), MachineError> {
+    stack: &mut Vec<StackWord, STACK_SIZE>,
+) -> Result<(StackWord, StackWord), MachineError> {
     let rhs = pop(stack)?;
     let lhs = pop(stack)?;
     Ok((lhs, rhs))
 }
 
 fn push<const STACK_SIZE: usize>(
-    stack: &mut Vec<Word, STACK_SIZE>,
-    value: Word,
+    stack: &mut Vec<StackWord, STACK_SIZE>,
+    value: StackWord,
 ) -> Result<(), MachineError> {
     if stack.push(value).is_err() {
         return Err(MachineError::StackOverflow);
@@ -673,11 +694,28 @@ fn push<const STACK_SIZE: usize>(
     Ok(())
 }
 
-fn word_to_color(word: Word) -> Result<u8, MachineError> {
-    match word.try_into() {
+fn word_to_color(word: StackWord) -> Result<u8, MachineError> {
+    match u8::try_from(word) {
         Ok(c) => Ok(c),
         Err(_) => Err(MachineError::ColorOutOfRange(word)),
     }
+}
+
+fn program_word_to_stack(word: ProgramWord) -> StackWord {
+    StackWord::from(word)
+}
+
+fn stack_word_to_program(value: StackWord) -> Result<ProgramWord, MachineError> {
+    ProgramWord::try_from(value).map_err(|_| MachineError::StackValueTooLargeForProgramWord(value))
+}
+
+fn stack_word_to_usize(value: StackWord) -> Result<usize, MachineError> {
+    usize::try_from(value).map_err(|_| MachineError::StackValueTooLargeForUsize(value))
+}
+
+fn stack_word_to_program_index(value: StackWord) -> Result<usize, MachineError> {
+    let program_word = stack_word_to_program(value)?;
+    Ok(usize::from(program_word))
 }
 
 #[cfg(test)]

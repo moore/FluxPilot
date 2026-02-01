@@ -7,7 +7,7 @@
 use heapless::{String, Vec};
 
 use crate::builder::{FunctionBuilder, FunctionIndex, MachineBuilder, MachineBuilderError, Op, ProgramBuilder};
-use crate::Word;
+use crate::ProgramWord;
 
 const MAX_TOKENS: usize = 6;
 const NAME_CAP: usize = 32;
@@ -80,17 +80,17 @@ impl From<MachineBuilderError> for AssemblerError {
 #[derive(Clone)]
 struct Label {
     name: String<NAME_CAP>,
-    offset: Word,
+    offset: ProgramWord,
 }
 
 struct Fixup {
     name: String<NAME_CAP>,
-    at: Word,
+    at: ProgramWord,
 }
 
 struct FuncEntry {
     name: String<NAME_CAP>,
-    index: Word,
+    index: ProgramWord,
     defined: bool,
 }
 
@@ -113,14 +113,14 @@ pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MA
     globals: Vec<Label, LABEL_CAP>,
     shared_globals: Vec<Label, LABEL_CAP>,
     stack_slots: Vec<Label, LABEL_CAP>,
-    data: Vec<Word, DATA_CAP>,
-    cursor: Word,
-    function_base: Word,
-    next_function_index: Word,
-    function_count: Word,
-    globals_size: Word,
-    globals_base: Word,
-    shared_globals_size: Word,
+    data: Vec<ProgramWord, DATA_CAP>,
+    cursor: ProgramWord,
+    function_base: ProgramWord,
+    next_function_index: ProgramWord,
+    function_count: ProgramWord,
+    globals_size: ProgramWord,
+    globals_base: ProgramWord,
+    shared_globals_size: ProgramWord,
     shared_globals_locked: bool,
     line_number: u32,
 }
@@ -653,7 +653,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         }
     }
 
-    fn next_free_function_index(&mut self) -> Result<Word, AssemblerError> {
+    fn next_free_function_index(&mut self) -> Result<ProgramWord, AssemblerError> {
         while self.funcs.iter().any(|entry| entry.index == self.next_function_index) {
             self.next_function_index = self
                 .next_function_index
@@ -668,7 +668,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Ok(index)
     }
 
-    fn mark_function_defined(&mut self, name: &String<NAME_CAP>, index: Word) -> Result<(), AssemblerError> {
+    fn mark_function_defined(&mut self, name: &String<NAME_CAP>, index: ProgramWord) -> Result<(), AssemblerError> {
         if let Some(entry) = self.funcs.iter_mut().find(|entry| entry.name == *name) {
             if entry.defined {
                 return Err(AssemblerError::Kind(
@@ -707,7 +707,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Ok(function)
     }
 
-    fn parse_op(&mut self, tokens: &[&str]) -> Result<(Op, Word), AssemblerError> {
+    fn parse_op(&mut self, tokens: &[&str]) -> Result<(Op, ProgramWord), AssemblerError> {
         let mnemonic = tokens.first().copied().ok_or(AssemblerError::Kind(
             AssemblerErrorKind::InvalidInstruction,
         ))?;
@@ -794,7 +794,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Ok((op, width))
     }
 
-    fn resolve_operand(&mut self, token: &str) -> Result<Option<Word>, AssemblerError> {
+    fn resolve_operand(&mut self, token: &str) -> Result<Option<ProgramWord>, AssemblerError> {
         if let Ok(value) = parse_word(token) {
             return Ok(Some(value));
         }
@@ -831,7 +831,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
     }
 
-    fn resolve_stack_operand(&mut self, token: &str) -> Result<Option<Word>, AssemblerError> {
+    fn resolve_stack_operand(&mut self, token: &str) -> Result<Option<ProgramWord>, AssemblerError> {
         if let Ok(value) = parse_word(token) {
             return Ok(Some(value));
         }
@@ -842,7 +842,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         self.resolve_operand(token)
     }
 
-    fn resolve_global_operand(&mut self, token: &str) -> Result<Option<Word>, AssemblerError> {
+    fn resolve_global_operand(&mut self, token: &str) -> Result<Option<ProgramWord>, AssemblerError> {
         if let Ok(value) = parse_word(token) {
             if value >= self.globals_size {
                 return Err(AssemblerError::Kind(
@@ -866,7 +866,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
     }
 }
 
-fn parse_word(token: &str) -> Result<Word, AssemblerError> {
+fn parse_word(token: &str) -> Result<ProgramWord, AssemblerError> {
     if let Some(hex) = token.strip_prefix("0x") {
         u16::from_str_radix(hex, 16)
             .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::InvalidNumber))

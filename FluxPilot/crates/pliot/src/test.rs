@@ -6,6 +6,7 @@ use crate::{
 use super::*;
 use light_machine::assembler::Assembler;
 use light_machine::builder::*;
+use light_machine::{ProgramWord, StackWord};
 use postcard::{from_bytes_cobs, to_vec_cobs};
 
 extern crate std;
@@ -24,7 +25,7 @@ const UI_BLOCK_SIZE: usize = 128;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>;
 
-fn build_simple_crawler_machine_lines(name: &str, init: [Word; 6]) -> StdVec<String> {
+fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> StdVec<String> {
     let source = format!(
         "
 .machine {} locals 6 functions 7
@@ -193,7 +194,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut stack: Vec<Word, 100> = Vec::new();
+    let mut stack: Vec<StackWord, 100> = Vec::new();
     let mut globals = [0u16; 10];
     let memory = globals.as_mut_slice();
     let mut pliot =
@@ -217,14 +218,14 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         assert_eq!(0, wrote);
     }
 
-    let (red, green, blue) = (17, 23, 31);
+    let (red, green, blue): (u16, u16, u16) = (17, 23, 31);
 
     {
-        let mut args = Vec::<u16, MAX_ARGS>::new();
+        let mut args = Vec::<StackWord, MAX_ARGS>::new();
 
-        args.push(red).unwrap();
-        args.push(green).unwrap();
-        args.push(blue).unwrap();
+        args.push(StackWord::from(red)).unwrap();
+        args.push(StackWord::from(green)).unwrap();
+        args.push(StackWord::from(blue)).unwrap();
 
         let store_function_index = descriptor.machines[0].functions[2].clone();
         let function = FunctionId {
@@ -262,7 +263,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     assert_eq!(stack.len(), 0);
 
     {
-        let args = Vec::<u16, MAX_ARGS>::new();
+        let args = Vec::<StackWord, MAX_ARGS>::new();
 
         println!("stack is {:?}", stack);
         let get_function_index = descriptor.machines[0].functions[1].clone();
@@ -317,12 +318,12 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
 
     let mut buffer = [0u16; 512];
     let builder =
-        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as Word)
+        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as ProgramWord)
             .unwrap();
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
 
-    let init_values: [[Word; 6]; MACHINE_COUNT] = [
+    let init_values: [[ProgramWord; 6]; MACHINE_COUNT] = [
         [10, 20, 30, 2, 100, 256],
         [40, 50, 60, 3, 80, 256],
         [70, 80, 90, 4, 60, 256],
@@ -346,7 +347,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     let mut globals = [0u16; 32];
     let memory = globals.as_mut_slice();
     let mut pliot =
@@ -366,7 +367,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     }
 
     let machine_count = pliot.machine_count()?;
-    assert_eq!(machine_count, MACHINE_COUNT as Word);
+    assert_eq!(machine_count, MACHINE_COUNT as ProgramWord);
 
     for (machine_index, init) in init_values.iter().enumerate() {
         stack.clear();
@@ -374,7 +375,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
         stack.push(0).unwrap();
         stack.push(0).unwrap();
         let (r, g, b) =
-            pliot.get_led_color(machine_index as Word, 0, 0, &mut stack)?;
+            pliot.get_led_color(machine_index as ProgramWord, 0, 0, &mut stack)?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -408,7 +409,7 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
 
     let mut buffer = [0u16; 256];
     let builder =
-        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as Word)
+        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as ProgramWord)
             .unwrap();
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
@@ -433,7 +434,7 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut stack: Vec<Word, 32> = Vec::new();
+    let mut stack: Vec<StackWord, 32> = Vec::new();
     let mut globals = [0u16; 8];
     let memory = globals.as_mut_slice();
     let mut pliot =

@@ -2,7 +2,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_usb::driver::{Driver, EndpointError};
 use heapless::Vec;
-use light_machine::Word;
+use light_machine::StackWord;
 use pliot::Pliot;
 
 use crate::usb_vendor::{VendorReceiver, VendorSender};
@@ -18,7 +18,7 @@ pub struct PliotShared<
     const STACK_SIZE: usize,
 > {
     pub pliot: Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, S>,
-    pub stack: Vec<Word, STACK_SIZE>,
+    pub stack: Vec<StackWord, STACK_SIZE>,
 }
 
 pub struct Disconnected {}

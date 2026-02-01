@@ -1,7 +1,7 @@
 use core::cmp::min;
 
 use heapless::{String, Vec};
-use light_machine::Word;
+use light_machine::{ProgramWord, StackWord};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub struct MachineId(u32);
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FunctionId {
-    pub machine_index: Word,
+    pub machine_index: ProgramWord,
     pub function_index: u32,
 }
 
@@ -101,17 +101,17 @@ pub enum Protocol<
     Call {
         request_id: RequestId,
         function: FunctionId,
-        args: Vec<u16, MAX_ARGS>,
+        args: Vec<StackWord, MAX_ARGS>,
     },
     /// The return value of a call to a function
     Return {
         request_id: RequestId,
-        result: Vec<u16, MAX_RESULT>,
+        result: Vec<StackWord, MAX_RESULT>,
     },
     /// Notification that a function was called on a machine
     Notifacation {
         function: FunctionId,
-        result: Vec<u16, MAX_RESULT>,
+        result: Vec<StackWord, MAX_RESULT>,
     },
     /// Function call produced error.
     Error {
@@ -125,13 +125,13 @@ pub enum Protocol<
         size: u32,
         ui_state_size: u32,
         block_number: u32,
-        block: Vec<Word, PROGRAM_BLOCK_SIZE>,
+        block: Vec<ProgramWord, PROGRAM_BLOCK_SIZE>,
     },
     /// Program Block
     ProgramBlock {
         request_id: RequestId,
         block_number: u32,
-        block: Vec<Word, PROGRAM_BLOCK_SIZE>,
+        block: Vec<ProgramWord, PROGRAM_BLOCK_SIZE>,
     },
     /// UI state block (opaque compressed bytes)
     UiStateBlock {
@@ -194,7 +194,7 @@ impl<
     pub fn call(
         &mut self,
         function: FunctionId,
-        args: Vec<u16, MAX_ARGS>,
+        args: Vec<StackWord, MAX_ARGS>,
     ) -> Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> {
         let request_id = self.get_request_id();
         Protocol::Call {
@@ -206,7 +206,7 @@ impl<
 
     pub fn get_program_loader<'a>(
         &mut self,
-        program: &'a [Word],
+        program: &'a [ProgramWord],
         ui_state: &'a [u8],
     ) -> ProgramLoader<'a, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> {
         let request_id = self.get_request_id();
@@ -253,7 +253,7 @@ pub struct ProgramLoader<
     next_program_block: u32,
     next_ui_block: u32,
     next_offset: usize,
-    program: &'a [Word],
+    program: &'a [ProgramWord],
     ui_state: &'a [u8],
     ui_offset: usize,
     finished: bool,
@@ -282,7 +282,7 @@ impl<
         const UI_BLOCK_SIZE: usize,
     > ProgramLoader<'a, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>
 {
-    fn new(request_id: RequestId, program: &'a [Word], ui_state: &'a [u8]) -> Self {
+    fn new(request_id: RequestId, program: &'a [ProgramWord], ui_state: &'a [u8]) -> Self {
         Self {
             request_id,
             next_program_block: 0,

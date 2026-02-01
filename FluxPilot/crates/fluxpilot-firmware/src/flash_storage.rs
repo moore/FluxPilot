@@ -1,6 +1,6 @@
 //! Flash-backed storage for Pliot programs using embedded-storage flash traits.
 use embedded_storage::nor_flash::{NorFlash, NorFlashError, NorFlashErrorKind};
-use light_machine::{Program, Word};
+use light_machine::{Program, ProgramWord};
 use pliot::{ProgramNumber, Storage, StorageError, StorageErrorKind};
 
 const WORD_SIZE_BYTES: usize = 2;
@@ -150,7 +150,7 @@ impl<F: NorFlash> FlashStorage<F> {
     }
 
     pub fn probe_write_read(&mut self) -> Result<(), StorageError> {
-        const TEST_VALUE: Word = 0xA5A5;
+        const TEST_VALUE: ProgramWord = 0xA5A5;
         let offset = self.storage_offset;
         let erase_len = align_up(WORD_SIZE_BYTES, F::ERASE_SIZE)?;
         self.flash_erase_range(offset, erase_len)?;
@@ -178,7 +178,7 @@ impl<F: NorFlash> FlashStorage<F> {
         self.load_header()
     }
 
-    pub fn write_program(&mut self, program: &[Word]) -> Result<(), StorageError> {
+    pub fn write_program(&mut self, program: &[ProgramWord]) -> Result<(), StorageError> {
         let byte_len = program
             .len()
             .checked_mul(WORD_SIZE_BYTES)
@@ -271,7 +271,7 @@ impl<F: NorFlash> FlashStorage<F> {
         &'a self,
         slot: usize,
         program_words: usize,
-    ) -> Option<&'a [Word]> {
+    ) -> Option<&'a [ProgramWord]> {
         let (start, end) = self.program_bounds(slot)?;
         let max_len = end
             .checked_sub(start)
@@ -282,7 +282,7 @@ impl<F: NorFlash> FlashStorage<F> {
         }
         // SAFETY: The storage region is linker-defined, word-aligned, and lives for the
         // program lifetime, so it's valid to create a static slice over it.
-        Some(unsafe { core::slice::from_raw_parts(start as *const Word, program_words) })
+        Some(unsafe { core::slice::from_raw_parts(start as *const ProgramWord, program_words) })
     }
 
     fn validate_program_crc(&self, slot: usize, program_words: usize, expected_crc: u32) -> bool {
@@ -368,7 +368,7 @@ impl<F: NorFlash> FlashStorage<F> {
         crc32_bytes(ui_state) == expected_crc
     }
 
-    fn program_slice<'a>(&'a self) -> &'a [Word] {
+    fn program_slice<'a>(&'a self) -> &'a [ProgramWord] {
         let Some((start, end)) = self.program_bounds(self.active_slot) else {
             return &[];
         };
@@ -379,7 +379,7 @@ impl<F: NorFlash> FlashStorage<F> {
         let len = self.program_words.min(max_len);
         // SAFETY: The storage region is linker-defined, word-aligned, and lives for the
         // program lifetime, so it's valid to create a static slice over it.
-        unsafe { core::slice::from_raw_parts(start as *const Word, len) }
+        unsafe { core::slice::from_raw_parts(start as *const ProgramWord, len) }
     }
 
     fn program_bounds(&self, slot: usize) -> Option<(usize, usize)> {
@@ -457,7 +457,7 @@ impl<F: NorFlash> FlashStorage<F> {
         })
     }
 
-    fn read_word(&mut self, offset: u32) -> Result<Word, StorageError> {
+    fn read_word(&mut self, offset: u32) -> Result<ProgramWord, StorageError> {
         let mut bytes = [0u8; WORD_SIZE_BYTES];
         self.flash.read(offset, &mut bytes).map_err(map_flash_error)?;
         Ok(u16::from_le_bytes(bytes))
@@ -484,7 +484,7 @@ impl<F: NorFlash> FlashStorage<F> {
         Ok(())
     }
 
-    fn flash_program_words(&mut self, start: u32, program: &[Word]) -> Result<(), StorageError> {
+    fn flash_program_words(&mut self, start: u32, program: &[ProgramWord]) -> Result<(), StorageError> {
         if start as usize % F::WRITE_SIZE != 0 {
             return Err(StorageError::new(StorageErrorKind::UnalignedWrite));
         }
@@ -627,7 +627,7 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
         &mut self,
         loader: &mut Self::L,
         block_number: u32,
-        block: &[Word],
+        block: &[ProgramWord],
     ) -> Result<(), StorageError> {
         if block_number != loader.next_block {
             return Err(StorageError::new(StorageErrorKind::UnexpectedBlock));
@@ -726,7 +726,7 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
     fn get_program<'a, 'b>(
         &'a mut self,
         program_number: ProgramNumber,
-        globals: &'b mut [Word],
+        globals: &'b mut [ProgramWord],
     ) -> Result<Program<'a, 'b>, StorageError> {
         if program_number.value() != 0 {
             return Err(StorageError::new(StorageErrorKind::UnknownProgram));
@@ -830,7 +830,7 @@ struct StorageHeader {
 
 fn storage_bounds() -> (usize, usize) {
     // SAFETY: These are linker-provided symbols, so taking their addresses is safe and does
-    // not require alignment. Alignment only matters when we later cast to `*const Word`, and
+    // not require alignment. Alignment only matters when we later cast to `*const ProgramWord`, and
     // the storage region is defined on a flash boundary in the linker script.
     let start = unsafe { &__storage_start as *const u8 as usize };
     let end = unsafe { &__storage_end as *const u8 as usize };
@@ -843,7 +843,7 @@ fn encode_header(
     ui_state_len: u32,
     ui_state_crc: u32,
     sequence: u32,
-) -> Result<[Word; HEADER_WORDS], StorageError> {
+) -> Result<[ProgramWord; HEADER_WORDS], StorageError> {
     let program_words = u32::try_from(program_words).map_err(|_| StorageError::new(StorageErrorKind::ProgramTooLarge))?;
     let mut bytes = [0u8; HEADER_SIZE_BYTES];
     bytes
@@ -900,7 +900,7 @@ fn crc32_bytes(bytes: &[u8]) -> u32 {
     crc32_finalize(crc)
 }
 
-fn crc32_words(words: &[Word]) -> u32 {
+fn crc32_words(words: &[ProgramWord]) -> u32 {
     let mut crc = crc32_init();
     for &word in words {
         crc = crc32_update(crc, &word.to_le_bytes());
@@ -979,7 +979,7 @@ mod tests {
     const FLASH_WORDS: usize = FLASH_BYTES / WORD_SIZE_BYTES;
 
     struct MockFlash {
-        storage: std::vec::Vec<Word>,
+        storage: std::vec::Vec<ProgramWord>,
     }
 
     impl MockFlash {

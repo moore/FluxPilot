@@ -2,7 +2,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Instant, Timer};
 use heapless::Vec;
-use light_machine::Word;
+use light_machine::StackWord;
 use smart_leds::{SmartLedsWrite, RGB8};
 
 use crate::usb_io::PliotShared;
@@ -50,16 +50,16 @@ pub async fn led_loop<
                 }
             };
             let seed_stack =
-                |stack: &mut Vec<Word, STACK_SIZE>, red: u8, green: u8, blue: u8| -> bool {
+                |stack: &mut Vec<StackWord, STACK_SIZE>, red: u8, green: u8, blue: u8| -> bool {
                     stack.clear();
-                    if stack.push(red as Word).is_err() {
+                    if stack.push(red as StackWord).is_err() {
                         return false;
                     }
-                    if stack.push(green as Word).is_err() {
+                    if stack.push(green as StackWord).is_err() {
                         stack.clear();
                         return false;
                     }
-                    if stack.push(blue as Word).is_err() {
+                    if stack.push(blue as StackWord).is_err() {
                         stack.clear();
                         return false;
                     }

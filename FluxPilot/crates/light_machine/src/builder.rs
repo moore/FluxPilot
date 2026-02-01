@@ -6,23 +6,23 @@ pub enum MachineBuilderError {
     MachineCountOverflowsWord(usize),
     TooLarge(usize),
     FunctionCoutExceeded,
-    GlobalOutOfRange(Word),
+    GlobalOutOfRange(ProgramWord),
     MachineCountExceeded,
 }
 
 /// Index for static data.
-pub struct DataIndex(Word);
+pub struct DataIndex(ProgramWord);
 
 /// Index for function.
 #[derive(Clone, Debug)]
-pub struct FunctionIndex(Word);
+pub struct FunctionIndex(ProgramWord);
 
 impl FunctionIndex {
-    pub fn new(index: Word) -> Self {
+    pub fn new(index: ProgramWord) -> Self {
         Self(index)
     }
 
-    pub fn to_word(&self) -> Word {
+    pub fn to_word(&self) -> ProgramWord {
         self.0
     }
 }
@@ -37,19 +37,19 @@ impl From<FunctionIndex> for u32 {
 /// [machine_count][machine offsets..][machines ...]
 ///
 pub struct ProgramBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
-    buffer: &'a mut [Word],
-    next_machine_builder: Word,
-    free: Word,
+    buffer: &'a mut [ProgramWord],
+    next_machine_builder: ProgramWord,
+    free: ProgramWord,
     descriptor: ProgramDescriptor<MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
-    shared_globals_size: Word,
+    shared_globals_size: ProgramWord,
 }
 
 impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
 {
-    pub fn new(buffer: &'a mut [Word], machine_count: Word) -> Result<Self, MachineBuilderError> {
+    pub fn new(buffer: &'a mut [ProgramWord], machine_count: ProgramWord) -> Result<Self, MachineBuilderError> {
         // Assure `Words` can be cast to `usize`
-        const { assert!(size_of::<Word>() <= size_of::<usize>()) };
+        const { assert!(size_of::<ProgramWord>() <= size_of::<usize>()) };
 
         // Make sure we have at least enough space to strore
         // the offsets to each machine and the count of machines.
@@ -81,7 +81,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         })
     }
 
-    pub fn set_shared_globals_size(&mut self, shared_globals_size: Word) -> Result<(), MachineBuilderError> {
+    pub fn set_shared_globals_size(&mut self, shared_globals_size: ProgramWord) -> Result<(), MachineBuilderError> {
         if self.next_machine_builder != 0 {
             return Err(MachineBuilderError::MachineCountExceeded);
         }
@@ -97,8 +97,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
 
     pub fn new_machine(
         self,
-        function_count: Word,
-        globals_size: Word,
+        function_count: ProgramWord,
+        globals_size: ProgramWord,
     ) -> Result<MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError>
     {
         let Some(next_machine_builder) = self.next_machine_builder.checked_add(1) else {
@@ -120,7 +120,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         set_value(
             self.buffer,
             machine_table_index,
-            self.free as Word,
+            self.free as ProgramWord,
             MachineBuilderError::BufferTooSmall,
         )?;
         let globals_offset = *self
@@ -137,7 +137,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         )
     }
 
-    fn allocate(&mut self, word_count: Word) -> Result<(), MachineBuilderError> {
+    fn allocate(&mut self, word_count: ProgramWord) -> Result<(), MachineBuilderError> {
         let free = usize::from(self.free);
         let word_count = usize::from(word_count);
         let Some(end) = free.checked_add(word_count) else {
@@ -146,14 +146,14 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         if end > self.buffer.len() {
             return Err(MachineBuilderError::BufferTooSmall);
         }
-        let Some(new_free) = self.free.checked_add(word_count as Word) else {
+        let Some(new_free) = self.free.checked_add(word_count as ProgramWord) else {
             return Err(MachineBuilderError::BufferTooSmall);
         };
         self.free = new_free;
         Ok(())
     }
 
-    fn add_word(&mut self, word: Word) -> Result<(), MachineBuilderError> {
+    fn add_word(&mut self, word: ProgramWord) -> Result<(), MachineBuilderError> {
         let index = usize::from(self.free);
         set_value(
             self.buffer,
@@ -168,7 +168,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         Ok(())
     }
 
-    fn finish_machine(&mut self, globals_size: Word, machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>) -> Result<(), MachineBuilderError>{
+    fn finish_machine(&mut self, globals_size: ProgramWord, machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>) -> Result<(), MachineBuilderError>{
         if self.descriptor.add_machine(machine_descriptor).is_err() {
             return Err(MachineBuilderError::MachineCountExceeded);
         }
@@ -201,23 +201,23 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
 /// [globals size][globals offset][function offsets...][static data + functions...]
 pub struct MachineBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     program: ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
-    machine_start: Word,
-    function_count: Word,
-    next_function_number: Word,
-    globals_size: Word,
-    globals_offset: Word,
-    shared_globals_size: Word,
+    machine_start: ProgramWord,
+    function_count: ProgramWord,
+    next_function_number: ProgramWord,
+    globals_size: ProgramWord,
+    globals_offset: ProgramWord,
+    shared_globals_size: ProgramWord,
     discriptor: MachineDescriptor<FUNCTION_COUNT_MAX>,
 }
 
 impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>
 {
-    pub fn program_free(&self) -> Word {
+    pub fn program_free(&self) -> ProgramWord {
         self.program.free
     }
 
-    fn patch_word(&mut self, index: Word, value: Word) -> Result<(), MachineBuilderError> {
+    fn patch_word(&mut self, index: ProgramWord, value: ProgramWord) -> Result<(), MachineBuilderError> {
         let index = usize::from(index);
         let Some(slot) = self.program.buffer.get_mut(index) else {
             return Err(MachineBuilderError::BufferTooSmall);
@@ -227,10 +227,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     }
     pub fn new(
         mut program: ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
-        function_count: Word,
-        globals_size: Word,
-        globals_offset: Word,
-        shared_globals_size: Word,
+        function_count: ProgramWord,
+        globals_size: ProgramWord,
+        globals_offset: ProgramWord,
+        shared_globals_size: ProgramWord,
     ) -> Result<Self, MachineBuilderError> {
         let machine_start = program.free;
         program.add_word(globals_size)?;
@@ -248,11 +248,11 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         })
     }
 
-    pub fn add_static(&mut self, data: &[Word]) -> Result<DataIndex, MachineBuilderError> {
-        if data.len() >= Word::MAX as usize {
+    pub fn add_static(&mut self, data: &[ProgramWord]) -> Result<DataIndex, MachineBuilderError> {
+        if data.len() >= ProgramWord::MAX as usize {
             return Err(MachineBuilderError::TooLarge(data.len()));
         }
-        let size = data.len() as Word;
+        let size = data.len() as ProgramWord;
         let index = DataIndex(self.program.free);
         self.program.allocate(size)?;
         let start = usize::from(index.0);
@@ -299,11 +299,11 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         Ok(self.program)
     }
 
-    pub fn globals_offset(&self) -> Word {
+    pub fn globals_offset(&self) -> ProgramWord {
         self.globals_offset
     }
 
-    fn validate_global_address(&self, address: Word) -> Result<(), MachineBuilderError> {
+    fn validate_global_address(&self, address: ProgramWord) -> Result<(), MachineBuilderError> {
         if address < self.shared_globals_size {
             return Ok(());
         }
@@ -316,13 +316,13 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         Ok(())
     }
 
-    fn add_word(&mut self, word: Word) -> Result<(), MachineBuilderError> {
+    fn add_word(&mut self, word: ProgramWord) -> Result<(), MachineBuilderError> {
         self.program.add_word(word)
     }
 
     fn finish_function(
         &mut self,
-        function_start: Word,
+        function_start: ProgramWord,
         index: FunctionIndex,
     ) -> Result<(), MachineBuilderError> {
         if self.discriptor.add_function(index.clone()).is_err() {
@@ -346,18 +346,18 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
 }
 
 pub enum Op {
-    Push(Word),
+    Push(ProgramWord),
     Pop,
-    Load(Word),
-    Store(Word),
+    Load(ProgramWord),
+    Store(ProgramWord),
     LoadStatic,
     Jump,
     Call,
-    StackLoad(Word),
-    StackStore(Word),
+    StackLoad(ProgramWord),
+    StackStore(ProgramWord),
     Dup,
     Swap,
-    Return(Word),
+    Return(ProgramWord),
     BranchLessThan,
     BranchLessThanEq,
     BranchGreaterThan,
@@ -381,7 +381,7 @@ pub enum Op {
 
 pub struct FunctionBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     machine: MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
-    function_start: Word,
+    function_start: ProgramWord,
     index: FunctionIndex,
 }
 
@@ -400,11 +400,11 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         }
     }
 
-    pub fn function_start(&self) -> Word {
+    pub fn function_start(&self) -> ProgramWord {
         self.function_start
     }
 
-    pub fn patch_word(&mut self, index: Word, value: Word) -> Result<(), MachineBuilderError> {
+    pub fn patch_word(&mut self, index: ProgramWord, value: ProgramWord) -> Result<(), MachineBuilderError> {
         self.machine.patch_word(index, value)
     }
 

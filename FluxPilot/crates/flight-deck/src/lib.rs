@@ -5,7 +5,8 @@ use pliot::protocol::{Controler, ErrorType, FunctionId, MessageType, Protocol};
 
 use light_machine::{
     ProgramDescriptor,
-    Word,
+    ProgramWord,
+    StackWord,
     assembler::{Assembler, AssemblerError, AssemblerErrorKind},
     builder::*,
 };
@@ -56,14 +57,14 @@ extern "C" {
     pub type ReceiveHandler;
 
     #[wasm_bindgen(method, js_name = onReturn)]
-    pub fn on_return(this: &ReceiveHandler, request_id: u64, result: &[Word]);
+    pub fn on_return(this: &ReceiveHandler, request_id: u64, result: &[StackWord]);
 
     #[wasm_bindgen(method, js_name = onNotification)]
     pub fn on_notification(
         this: &ReceiveHandler,
-        machine_index: Word,
+        machine_index: ProgramWord,
         function_index: u32,
-        result: &[Word],
+        result: &[StackWord],
     );
 
     #[wasm_bindgen(method, js_name = onError)]
@@ -154,12 +155,17 @@ impl FlightDeck {
         }
     }
 
-    pub fn call(&mut self, machine_index: Word, function_index: u32, args: &[Word]) -> Result<Option<u64>, FlightDeckError> {
+    pub fn call(
+        &mut self,
+        machine_index: ProgramWord,
+        function_index: u32,
+        args: &[StackWord],
+    ) -> Result<Option<u64>, FlightDeckError> {
         if args.len() > MAX_ARGS {
             return Err(FlightDeckError::ToManyArguments);
         }
 
-        let mut call_args = Vec::<Word, MAX_ARGS>::new();
+        let mut call_args = Vec::<StackWord, MAX_ARGS>::new();
 
         for arg in args {
            if call_args.push(*arg).is_err() {
@@ -242,7 +248,7 @@ impl FlightDeck {
 
     pub fn load_program(
         &mut self,
-        program: &[Word],
+        program: &[ProgramWord],
         length: usize,
         ui_state: &[u8],
     ) -> Result<(), FlightDeckError> {

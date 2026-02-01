@@ -6,18 +6,19 @@ reference for code generation, assemblers, and runtime behavior.
 
 ## Word size and types
 
-- `Word` is `u16` (unsigned 16-bit).
-- All instruction words and data words are `Word`.
-- Stack elements are `Word`.
-- Machine indices, function indices, and addresses are `Word` values that are
-  interpreted as `usize` for indexing when safe.
+- `ProgramWord` is `u16` (unsigned 16-bit).
+- `StackWord` is `u32` (unsigned 32-bit).
+- All instruction words and data words are `ProgramWord`.
+- Stack elements are `StackWord`.
+- Machine indices, function indices, and program addresses are `ProgramWord`
+  values that are interpreted as `usize` for indexing when safe.
 
 ## Program memory layout
 
-Programs are stored in a single contiguous `Word` array. The runtime is given:
+Programs are stored in a single contiguous `ProgramWord` array. The runtime is given:
 
-- `static_data`: the program `Word` array.
-- `globals`: a mutable `Word` array for persistent per-program state.
+- `static_data`: the program `ProgramWord` array.
+- `globals`: a mutable `ProgramWord` array for persistent per-program state.
 
 The program header:
 
@@ -47,7 +48,7 @@ count is not stored in the program image; it is known to the builder/host.
 
 ## Stack model
 
-- The VM is stack-based. The stack holds `Word` values.
+- The VM is stack-based. The stack holds `StackWord` values.
 - Most operations pop their operands from the stack and push results.
 - Stack underflow/overflow are runtime errors.
 
@@ -56,7 +57,7 @@ count is not stored in the program image; it is known to the builder/host.
 The VM maintains a `frame_pointer` that indexes into the current stack.
 `SLOAD` and `SSTORE` use offsets relative to the frame pointer.
 
-`frame_pointer` is a `Word` and is interpreted as a `usize` index.
+`frame_pointer` is a `StackWord` and is interpreted as a `usize` index (checked).
 
 ## Calling convention
 
@@ -84,8 +85,8 @@ sets the program counter to `return_pc`.
 
 ## Instruction encoding
 
-- Each instruction is a single `Word` opcode.
-- Some opcodes are followed by a single `Word` immediate operand.
+- Each instruction is a single `ProgramWord` opcode.
+- Some opcodes are followed by a single `ProgramWord` immediate operand.
 - For convenience, the assembler expands `CALL`/`JUMP`/branches with operands
   into `PUSH <operand>` + `<op>`. For `CALL`, the caller must still push
   `arg_count` beneath the function index.

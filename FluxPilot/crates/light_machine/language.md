@@ -11,7 +11,7 @@ to opcodes and word data.
 
 - Simple, line-oriented syntax.
 - Easy to add or rename opcodes in one table.
-- Minimal syntax sugar; keep it close to the VM's u16 word stream.
+- Minimal syntax sugar; keep it close to the VM's u16 program word stream.
 - Labels for readability.
 - A clear place for locals size, machines, and functions.
 
@@ -24,7 +24,7 @@ Directives (top-level):
 - `.machine <name> locals <N> functions <M>`: starts a new machine (locals are per-machine state).
 - `.func <name> [index <I>]`: starts a new function within the current machine.
 - `.func_decl <name> [index <I>]`: declares a function without a body.
-- `.data <name>`: starts a static data block (u16 words).
+- `.data <name>`: starts a static data block (u16 program words).
 - `.shared <name> <index>`: declares a named shared global index (program-scoped).
 - `.frame <name> <offset>`: declares a named stack slot for SLOAD/SSTORE.
 - `.end`: ends the current machine, function, or data block.
@@ -35,7 +35,7 @@ Directives (machine-level):
 
 Notes:
 
-- `<N>` and `<M>` are u16 values.
+- `<N>` and `<M>` are u16 values (program words).
 - `<name>` is currently informational; the assembler does not emit it.
 - `index <I>` is optional; if omitted, functions are assigned in order.
 - `.func_decl` reserves an index and allows forward references in a one-pass
@@ -54,7 +54,8 @@ Use `;` for line comments.
 
 ## Numbers
 
-All numbers are u16 unless otherwise specified.
+All numbers in the assembly source are u16 program words unless otherwise specified.
+Stack values are u32 at runtime.
 Supported formats:
 
 - Decimal: `123`
@@ -71,7 +72,7 @@ One instruction per line:
 
     <MNEMONIC> [operand]
 
-Operands are u16 words or label references, depending on the opcode.
+Operands are u16 program words or label references, depending on the opcode.
 Mnemonics are case-insensitive in the assembler.
 
 ## Instruction table
@@ -84,7 +85,7 @@ assembler accepts an operand and expands it to `PUSH <operand>` + `<op>`.
 
 Stack ops:
 
-- `PUSH <word>`         ; Push immediate word (2 words total)
+- `PUSH <word>`         ; Push immediate program word (2 words total)
 - `POP`                 ; Pop and discard
 - `DUP`                 ; Duplicate top of stack
 - `SWAP`                ; Swap top two values
@@ -147,7 +148,7 @@ should be treated as "future programs" and may error at runtime.
 
 ## Program layout (informative)
 
-The binary program is a `u16` array structured as:
+The binary program is a `u16` (program word) array structured as:
 
     [machine_count][globals_size][machine_table...][machines...]
 

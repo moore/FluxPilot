@@ -14,7 +14,7 @@ const ASM_FUNCTION_MAX: usize = 8;
 const ASM_LABEL_CAP: usize = 32;
 const ASM_DATA_CAP: usize = 64;
 
-fn assemble_program(lines: &[&str]) -> StdVec<Word> {
+fn assemble_program(lines: &[&str]) -> StdVec<ProgramWord> {
     let mut buffer = [0u16; 256];
     let builder =
         ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(&mut buffer, 1).unwrap();
@@ -28,15 +28,15 @@ fn assemble_program(lines: &[&str]) -> StdVec<Word> {
 }
 
 fn run_single(
-    program: &[Word],
-    globals: &mut [Word],
-    stack: &mut Vec<Word, STACK_CAP>,
+    program: &[ProgramWord],
+    globals: &mut [ProgramWord],
+    stack: &mut Vec<StackWord, STACK_CAP>,
 ) -> Result<(), MachineError> {
     let mut program = Program::new(program, globals)?;
     program.call(0, 0, stack)
 }
 
-fn build_simple_crawler_machine_lines(name: &str, init: [Word; 6]) -> StdVec<String> {
+fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> StdVec<String> {
     let source = format!(
         "
 .machine {} locals 6 functions 7
@@ -172,7 +172,7 @@ fn test_locals_are_machine_scoped() -> Result<(), MachineError> {
     let descriptor = asm.finish().unwrap();
     let program = &buffer[..descriptor.length];
     let mut globals = [0u16; 2];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
 
     {
         let mut program = Program::new(program, globals.as_mut_slice())?;
@@ -199,12 +199,12 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
 
     let mut buffer = [0u16; 512];
     let builder =
-        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as Word)
+        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as ProgramWord)
             .unwrap();
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
 
-    let init_values: [[Word; 6]; MACHINE_COUNT] = [
+    let init_values: [[ProgramWord; 6]; MACHINE_COUNT] = [
         [10, 20, 30, 2, 100, 256],
         [40, 50, 60, 3, 80,  256],
         [70, 80, 90, 4, 60,  256],
@@ -225,7 +225,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
 
     let program = &buffer[..descriptor.length];
     let mut globals = [0u16; 32];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     let mut program = Program::new(program, globals.as_mut_slice())?;
 
     let machine_count = program.machine_count()?;
@@ -233,7 +233,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     assert_eq!(machine_count, MACHINE_COUNT as u16);
 
     for machine_index in 0..machine_count {
-        program.init_machine(machine_index as Word, &mut stack)?;
+        program.init_machine(machine_index as ProgramWord, &mut stack)?;
         assert!(stack.is_empty());
     }
 
@@ -243,7 +243,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
         stack.push(0).unwrap();
         stack.push(0).unwrap();
         let (r, g, b) =
-            program.get_led_color(machine_index as Word, 0, 0, &mut stack)?;
+            program.get_led_color(machine_index as ProgramWord, 0, 0, &mut stack)?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -260,7 +260,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
                 stack.push(0).unwrap();
                 stack.push(0).unwrap();
                 stack.push(0).unwrap();
-                program.get_led_color(machine_index as Word, j, i, &mut stack)?;
+                program.get_led_color(machine_index as ProgramWord, j as u16, i as u16, &mut stack)?;
             
             }
         }
@@ -275,9 +275,9 @@ fn test_init_get_color() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 3 functions 2",
         ".func set_rgb index 0",
-        "STORE 0",
-        "STORE 1",
         "STORE 2",
+        "STORE 1",
+        "STORE 0",
         "EXIT",
         ".end",
         ".func get_rgb index 1",
@@ -292,15 +292,15 @@ fn test_init_get_color() -> Result<(), MachineError> {
     println!("program {:?}", program);
 
     let mut globals = [0u16; 10];
-    let (red, green, blue) = (17, 23, 31);
-    let mut stack: Vec<Word, 100> = Vec::new();
+    let (red, green, blue): (u16, u16, u16) = (17, 23, 31);
+    let mut stack: Vec<StackWord, 100> = Vec::new();
 
     {
         let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
 
-        stack.push(red).unwrap();
-        stack.push(green).unwrap();
-        stack.push(blue).unwrap();
+        stack.push(StackWord::from(red)).unwrap();
+        stack.push(StackWord::from(green)).unwrap();
+        stack.push(StackWord::from(blue)).unwrap();
         program.init_machine(0, &mut stack)?;
     }
     assert_eq!(stack.len(), 0);
@@ -335,9 +335,9 @@ fn test_init_get_color2() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 3 functions 2",
         ".func set_rgb index 0",
-        "STORE 0",
-        "STORE 1",
         "STORE 2",
+        "STORE 1",
+        "STORE 0",
         "EXIT",
         ".end",
         ".func get_rgb index 1",
@@ -355,15 +355,15 @@ fn test_init_get_color2() -> Result<(), MachineError> {
     println!("program {:?}", program);
 
     let mut globals = [0u16; 10];
-    let (red, green, blue) = (17, 23, 31);
-    let mut stack: Vec<Word, 100> = Vec::new();
+    let (red, green, blue): (u16, u16, u16) = (17, 23, 31);
+    let mut stack: Vec<StackWord, 100> = Vec::new();
 
     {
         let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
 
-        stack.push(red).unwrap();
-        stack.push(green).unwrap();
-        stack.push(blue).unwrap();
+        stack.push(StackWord::from(red)).unwrap();
+        stack.push(StackWord::from(green)).unwrap();
+        stack.push(StackWord::from(blue)).unwrap();
         program.init_machine(0, &mut stack)?;
     }
     assert_eq!(stack.len(), 0);
@@ -383,7 +383,7 @@ fn test_init_get_color2() -> Result<(), MachineError> {
             .expect("Could not get led color");
 
         println!("stack is {:?}", stack);
-        assert_eq!((r as u16, g as u16, b as u16), (red, green, blue + 1));
+        assert_eq!((r as u16, g as u16, b as u16), (red + 1, green, blue));
 
         assert_eq!(stack.len(), 4);
         assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
@@ -398,7 +398,7 @@ fn test_init_get_color2() -> Result<(), MachineError> {
             .expect("Could not get led color");
 
         println!("stack is {:?}", stack);
-        assert_eq!((r as u16, g as u16, b as u16), (red, green, blue + 30));
+        assert_eq!((r as u16, g as u16, b as u16), (red + 30, green, blue));
     }
 
     assert_eq!(stack.len(), 4);
@@ -419,7 +419,7 @@ fn op_push() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[42]);
     Ok(())
@@ -437,7 +437,7 @@ fn op_pop() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert!(stack.is_empty());
     Ok(())
@@ -455,7 +455,7 @@ fn op_dup() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[5, 5]);
     Ok(())
@@ -474,7 +474,7 @@ fn op_swap() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[2, 1]);
     Ok(())
@@ -493,7 +493,7 @@ fn op_sload() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[10, 20, 10]);
     Ok(())
@@ -515,7 +515,7 @@ fn op_sload_named() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[10, 20, 10, 20]);
     Ok(())
@@ -535,7 +535,7 @@ fn op_sstore() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[3, 2]);
     Ok(())
@@ -557,7 +557,7 @@ fn op_sstore_named() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[3, 2]);
     Ok(())
@@ -574,7 +574,7 @@ fn op_load() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [99u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[99]);
     Ok(())
@@ -592,7 +592,7 @@ fn op_store() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(globals[0], 7);
     assert!(stack.is_empty());
@@ -613,7 +613,7 @@ fn op_load_named_global() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [10u16, 20u16];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[10, 20]);
     Ok(())
@@ -635,7 +635,7 @@ fn op_store_named_global() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 2];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(globals, [55, 77]);
     assert!(stack.is_empty());
@@ -657,7 +657,7 @@ fn op_load_static() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[123]);
     Ok(())
@@ -678,7 +678,7 @@ fn op_jump() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
     Ok(())
@@ -701,7 +701,7 @@ fn op_branch_less_than() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
     Ok(())
@@ -724,7 +724,7 @@ fn op_branch_less_than_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[9]);
     Ok(())
@@ -747,7 +747,7 @@ fn op_branch_less_than_eq() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
     Ok(())
@@ -770,7 +770,7 @@ fn op_branch_less_than_eq_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[9]);
     Ok(())
@@ -793,7 +793,7 @@ fn op_branch_greater_than() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
     Ok(())
@@ -816,7 +816,7 @@ fn op_branch_greater_than_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[9]);
     Ok(())
@@ -839,7 +839,7 @@ fn op_branch_greater_than_eq() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
     Ok(())
@@ -862,7 +862,7 @@ fn op_branch_greater_than_eq_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[9]);
     Ok(())
@@ -885,7 +885,7 @@ fn op_branch_equal() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
     Ok(())
@@ -908,7 +908,7 @@ fn op_branch_equal_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[9]);
     Ok(())
@@ -927,7 +927,7 @@ fn op_and() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
     Ok(())
@@ -946,7 +946,7 @@ fn op_and_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[0]);
     Ok(())
@@ -965,7 +965,7 @@ fn op_or() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
     Ok(())
@@ -984,7 +984,7 @@ fn op_or_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[0]);
     Ok(())
@@ -1003,7 +1003,7 @@ fn op_xor() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
     Ok(())
@@ -1022,7 +1022,7 @@ fn op_xor_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[0]);
     Ok(())
@@ -1040,7 +1040,7 @@ fn op_not() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
     Ok(())
@@ -1058,7 +1058,7 @@ fn op_not_false() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[0]);
     Ok(())
@@ -1077,7 +1077,7 @@ fn op_bitwise_and() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[0x000F]);
     Ok(())
@@ -1096,7 +1096,7 @@ fn op_bitwise_or() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[0x0FFF]);
     Ok(())
@@ -1115,7 +1115,7 @@ fn op_bitwise_xor() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[0x0FF0]);
     Ok(())
@@ -1133,9 +1133,9 @@ fn op_bitwise_not() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
-    assert_eq!(stack.as_slice(), &[0xFF00]);
+    assert_eq!(stack.as_slice(), &[0xFFFF_FF00]);
     Ok(())
 }
 
@@ -1152,7 +1152,7 @@ fn op_multiply() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[42]);
     Ok(())
@@ -1171,7 +1171,7 @@ fn op_divide() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[12]);
     Ok(())
@@ -1190,7 +1190,7 @@ fn op_mod() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[4]);
     Ok(())
@@ -1209,7 +1209,7 @@ fn op_add() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[12]);
     Ok(())
@@ -1228,7 +1228,7 @@ fn op_subtract() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[7]);
     Ok(())
@@ -1246,7 +1246,7 @@ fn op_exit() -> Result<(), MachineError> {
         ".end",
     ]);
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[1]);
     Ok(())
@@ -1272,7 +1272,7 @@ fn op_return() -> Result<(), MachineError> {
     ]); 
 
     let mut globals = [0u16; 1];
-    let mut stack: Vec<Word, STACK_CAP> = Vec::new();
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
     run_single(&program, &mut globals, &mut stack)?;
     assert_eq!(stack.as_slice(), &[77, 88, 99]);
     Ok(())

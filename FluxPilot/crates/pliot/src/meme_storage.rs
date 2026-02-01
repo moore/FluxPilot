@@ -1,14 +1,14 @@
-use crate::{Program, ProgramNumber, Storage, StorageError, StorageErrorKind, Word};
+use crate::{Program, ProgramNumber, Storage, StorageError, StorageErrorKind, ProgramWord};
 
 pub struct MemStorage<'a> {
-    programs: [&'a mut [Word]; 2],
+    programs: [&'a mut [ProgramWord]; 2],
     active_index: usize,
     ui_state: &'a mut [u8],
     ui_state_len: usize,
 }
 
 impl<'a> MemStorage<'a> {
-    pub fn new(program: &'a mut [Word], ui_state: &'a mut [u8]) -> Self {
+    pub fn new(program: &'a mut [ProgramWord], ui_state: &'a mut [u8]) -> Self {
         // Split the provided buffer into two halves so we can swap on load completion.
         let mid = program.len() / 2;
         let (program_a, program_b) = program.split_at_mut(mid);
@@ -55,7 +55,7 @@ impl<'a> Storage for MemStorage<'a> {
         &mut self,
         loader: &mut Self::L,
         block_number: u32,
-        block: &[Word],
+        block: &[ProgramWord],
     ) -> Result<(), StorageError> {
         loader.add_block(self.programs[loader.target_index], block_number, block)
     }
@@ -80,7 +80,7 @@ impl<'a> Storage for MemStorage<'a> {
     fn get_program<'b, 'c>(
         &'b mut self,
         program_number: ProgramNumber,
-        globals: &'c mut [Word],
+        globals: &'c mut [ProgramWord],
     ) -> Result<Program<'b, 'c>, StorageError> {
         if program_number.0 != 0 {
             return Err(StorageError::new(StorageErrorKind::UnknownProgram));
@@ -147,9 +147,9 @@ impl MemProgrameLoader {
 
     fn add_block(
         &mut self,
-        program: &mut [Word],
+        program: &mut [ProgramWord],
         block_number: u32,
-        block: &[Word],
+        block: &[ProgramWord],
     ) -> Result<(), StorageError> {
         if block_number != self.next_block {
             return Err(StorageError::new(StorageErrorKind::UnexpectedBlock));
