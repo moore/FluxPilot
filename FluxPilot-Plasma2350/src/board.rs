@@ -1,4 +1,5 @@
 //! Plasma 2350 board pin mapping derived from the schematic and pinout PDFs.
+#![allow(dead_code)]
 
 /// LED strip screw terminal is driven through a level shifter.
 /// These GPIOs are 3.3V on the RP2350; the screw terminals are 5V.
