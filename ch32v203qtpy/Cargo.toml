@@ -54,18 +54,18 @@ portable-atomic  = { version = "1.11.1", features = ["critical-section"] }
 panic-halt = "1.0"
 
 embedded-hal = "1.0.0"
-heapless  = { workspace = true }
+heapless  = { version = "0.9.0", default-features = false, features = ["portable-atomic-critical-section", "serde"] }
 micromath = { version = "2.1.0", features = ["num-traits"] }
 smart-leds = "0.4.0"
 ws2812-spi = "0.5.0"
-thiserror-no-std = {workspace = true}
-embedded-storage = { workspace = true }
-light_machine = {path = "../light_machine"}
+thiserror-no-std = "2.0.2"
+embedded-storage = "0.3.1"
+light_machine = {path = "../FluxPilot/crates/light_machine"}
 embassy-sync = "0.7.0"
-postcard = { workspace = true }
-pliot = { path = "../pliot" }
+postcard = { version = "1.1.3", features = ["heapless"], default-features = false }
+pliot = { path = "../FluxPilot/crates/pliot" }
 static_cell = "2.1.1"
-fluxpilot-firmware = { path = "../fluxpilot-firmware" }
+fluxpilot-firmware = { path = "../FluxPilot/crates/fluxpilot-firmware" }
 
 
 [features]
@@ -75,6 +75,15 @@ storage-flash = []
 
 # mipidsi = "0.7.1"
 # embedded-hal-bus = "0.1.0"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 0
+strip = "symbols"
+panic = "abort"
+incremental = false
 
 
 ## This is spesified in the wrokspace Cargo.toml
