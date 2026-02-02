@@ -18,6 +18,7 @@
  2. ~~Store UI state on flash and reload to UI on usb connect.~~
  3. ~~Move to to u32 for stack instead of u16~~
  4. Allow common functions in shared static to reduce duplcation across machines.
+    - Plan: `FluxPilot/crates/light_machine/shared_functions_plan.md`
  
 ## Phase 3
 

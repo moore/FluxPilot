@@ -287,25 +287,25 @@ export const CRAWLER_MACHINE = `
 
     .func init index 0
       PUSH 0
-      STORE red
+      LSTORE red
       PUSH 16
-      STORE green
+      LSTORE green
       PUSH 32
-      STORE blue
+      LSTORE blue
       PUSH 10
-      STORE brightness
+      LSTORE brightness
       EXIT
     .end
 
     .func set_rgb index 2
-      STORE blue
-      STORE green
-      STORE red
+      LSTORE blue
+      LSTORE green
+      LSTORE red
       EXIT
     .end
 
     .func set_brightness index 3
-      STORE brightness
+      LSTORE brightness
       EXIT
     .end
 
@@ -344,27 +344,27 @@ export const CRAWLER_MACHINE = `
       SWAP
       DIV
       DUP    ; Scale red
-      LOAD red
+      LLOAD red
       SWAP
       DIV
-      LOAD brightness
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
       SWAP    ; Scale green
       DUP
-      LOAD green
+      LLOAD green
       SWAP
       DIV
-      LOAD brightness
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
       SWAP    ; Scale blue
-      LOAD blue
+      LLOAD blue
       SWAP
       DIV
-      LOAD brightness
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
@@ -390,39 +390,39 @@ export const SIMPLE_CRAWLER_MACHINE = `
 
     .func init index 0
       LOAD_STATIC init_red
-      STORE red
+      LSTORE red
       LOAD_STATIC init_green
-      STORE green
+      LSTORE green
       LOAD_STATIC init_blue
-      STORE blue
+      LSTORE blue
       LOAD_STATIC init_speed
-      STORE speed
+      LSTORE speed
       LOAD_STATIC init_brightness
-      STORE brightness
+      LSTORE brightness
       LOAD_STATIC init_led_count
-      STORE led_count
+      LSTORE led_count
       EXIT
     .end
 
     .func set_rgb index 2
-      STORE blue
-      STORE green
-      STORE red
+      LSTORE blue
+      LSTORE green
+      LSTORE red
       EXIT
     .end
 
     .func set_brightness index 3
-      STORE brightness
+      LSTORE brightness
       EXIT
     .end
 
     .func set_speed index 4
-      STORE speed
+      LSTORE speed
       EXIT
     .end
 
     .func set_led_count index 6
-      STORE led_count
+      LSTORE led_count
       EXIT
     .end
 
@@ -434,11 +434,11 @@ export const SIMPLE_CRAWLER_MACHINE = `
       .frame ticks 4
       SLOAD led_index
       SLOAD ticks
-      LOAD speed ; Ticks per led
-      LOAD led_count
+      LLOAD speed ; Ticks per led
+      LLOAD led_count
       MUL  ; total ticks for a anamation cycle
       MOD ; count up total ticks and cycle
-      LOAD speed
+      LLOAD speed
       DIV
       BREQ match
       SLOAD sred
@@ -446,18 +446,18 @@ export const SIMPLE_CRAWLER_MACHINE = `
       SLOAD sblue
       RET 3
       match: 
-      LOAD red
-      LOAD brightness
+      LLOAD red
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
-      LOAD green
-      LOAD brightness
+      LLOAD green
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
-      LOAD blue
-      LOAD brightness
+      LLOAD blue
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
@@ -486,25 +486,25 @@ export const PULSE_MACHINE = `
 
     .func init index 0
       LOAD_STATIC init_red
-      STORE red
+      LSTORE red
       LOAD_STATIC init_green
-      STORE green
+      LSTORE green
       LOAD_STATIC init_blue
-      STORE blue
+      LSTORE blue
       PUSH 10
-      STORE brightness
+      LSTORE brightness
       EXIT
     .end
 
     .func set_rgb index 2
-      STORE blue
-      STORE green
-      STORE red
+      LSTORE blue
+      LSTORE green
+      LSTORE red
       EXIT
     .end
 
     .func set_brightness index 3
-      STORE brightness
+      LSTORE brightness
       EXIT
     .end
 
@@ -532,19 +532,19 @@ export const PULSE_MACHINE = `
       even:
       PUSH 4
       DIV
-      LOAD 0
+      LLOAD 0
       ADD
-      LOAD brightness
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
-      LOAD 1
-      LOAD brightness
+      LLOAD 1
+      LLOAD brightness
       MUL
       PUSH 100
       DIV
-      LOAD 2
-      LOAD brightness
+      LLOAD 2
+      LLOAD brightness
       MUL
       PUSH 100
       DIV

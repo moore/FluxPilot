@@ -6,7 +6,15 @@
 
 use heapless::{String, Vec};
 
-use crate::builder::{FunctionBuilder, FunctionIndex, MachineBuilder, MachineBuilderError, Op, ProgramBuilder};
+use crate::builder::{
+    FunctionBuilder,
+    FunctionIndex,
+    MachineBuilder,
+    MachineBuilderError,
+    Op,
+    ProgramBuilder,
+    SharedFunctionBuilder,
+};
 use crate::ProgramWord;
 
 const MAX_TOKENS: usize = 6;
@@ -99,17 +107,21 @@ enum BlockKind {
     Machine,
     Function,
     Data,
+    SharedFunction,
+    SharedData,
 }
 
 pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const LABEL_CAP: usize, const DATA_CAP: usize> {
     program: Option<ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>>,
     machine: Option<MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>>,
     function: Option<FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>>,
+    shared_function: Option<SharedFunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>>,
     block: BlockKind,
     labels: Vec<Label, LABEL_CAP>,
     static_labels: Vec<Label, LABEL_CAP>,
     fixups: Vec<Fixup, LABEL_CAP>,
     funcs: Vec<FuncEntry, FUNCTION_COUNT_MAX>,
+    shared_funcs: Vec<FuncEntry, FUNCTION_COUNT_MAX>,
     globals: Vec<Label, LABEL_CAP>,
     shared_globals: Vec<Label, LABEL_CAP>,
     stack_slots: Vec<Label, LABEL_CAP>,
@@ -118,6 +130,8 @@ pub struct Assembler<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MA
     function_base: ProgramWord,
     next_function_index: ProgramWord,
     function_count: ProgramWord,
+    shared_function_count: ProgramWord,
+    next_shared_function_index: ProgramWord,
     globals_size: ProgramWord,
     globals_base: ProgramWord,
     shared_globals_size: ProgramWord,
@@ -129,15 +143,18 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
     Assembler<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX, LABEL_CAP, DATA_CAP>
 {
     pub fn new(builder: ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>) -> Self {
+        let shared_function_count = builder.shared_function_count();
         Self {
             program: Some(builder),
             machine: None,
             function: None,
+            shared_function: None,
             block: BlockKind::None,
             labels: Vec::new(),
             static_labels: Vec::new(),
             fixups: Vec::new(),
             funcs: Vec::new(),
+            shared_funcs: Vec::new(),
             globals: Vec::new(),
             shared_globals: Vec::new(),
             stack_slots: Vec::new(),
@@ -146,6 +163,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             function_base: 0,
             next_function_index: 0,
             function_count: 0,
+            shared_function_count,
+            next_shared_function_index: 0,
             globals_size: 0,
             globals_base: 0,
             shared_globals_size: 0,
@@ -191,7 +210,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 .map_err(|err| err.with_line(line_number));
         }
 
-        if matches!(self.block, BlockKind::Data) && first != ".end" {
+        if matches!(self.block, BlockKind::Data | BlockKind::SharedData) && first != ".end" {
             return self
                 .handle_data_line(&tokens)
                 .map_err(|err| err.with_line(line_number));
@@ -213,6 +232,13 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         match self.block {
             BlockKind::None => {}
             _ => return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective)),
+        }
+        for entry in self.shared_funcs.iter() {
+            if !entry.defined {
+                return Err(AssemblerError::Kind(
+                    AssemblerErrorKind::FunctionNotDeclared,
+                ));
+            }
         }
         let program = self
             .program
@@ -249,10 +275,13 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ".machine" => self.start_machine(tokens),
             ".func" => self.start_function(tokens),
             ".func_decl" => self.declare_function(tokens),
+            ".shared_func" => self.start_shared_function(tokens),
+            ".shared_func_decl" => self.declare_shared_function(tokens),
             ".local" => self.declare_local(tokens),
             ".shared" => self.declare_shared(tokens),
             ".frame" => self.declare_stack_slot(tokens),
             ".data" => self.start_data(tokens),
+            ".shared_data" => self.start_shared_data(tokens),
             ".end" => self.end_block(),
             _ => Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective)),
         }
@@ -302,6 +331,56 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Ok(())
     }
 
+    fn start_shared_function(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
+        if !matches!(self.block, BlockKind::None) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
+        }
+        if tokens.len() != 2 && tokens.len() != 4 {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+        }
+        let name = to_name(tokens.get(1).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        let index = if tokens.len() == 4 {
+            if tokens.get(2).copied() != Some("index") {
+                return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+            }
+            parse_word(tokens.get(3).ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidDirective,
+            ))?)?
+        } else if let Some(entry) = self.shared_funcs.iter().find(|entry| entry.name == name) {
+            entry.index
+        } else {
+            self.next_free_shared_function_index()?
+        };
+
+        if index >= self.shared_function_count {
+            return Err(AssemblerError::Kind(
+                AssemblerErrorKind::FunctionIndexOutOfRange,
+            ));
+        }
+        self.mark_shared_function_defined(&name, index)?;
+
+        self.labels.clear();
+        self.fixups.clear();
+        self.stack_slots.clear();
+        self.cursor = 0;
+        let program = self
+            .program
+            .take()
+            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingProgram))?;
+        let mut program = program;
+        if !self.shared_globals_locked {
+            program.set_shared_globals_size(self.shared_globals_size)?;
+            self.shared_globals_locked = true;
+        }
+        let function = program.new_shared_function_at_index(FunctionIndex::new(index))?;
+        self.function_base = function.function_start();
+        self.shared_function = Some(function);
+        self.block = BlockKind::SharedFunction;
+        Ok(())
+    }
+
     fn declare_local(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
         if !matches!(self.block, BlockKind::Machine) {
             return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
@@ -326,12 +405,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 AssemblerErrorKind::GlobalIndexOutOfRange,
             ));
         }
-        let offset = self
-            .globals_base
-            .checked_add(index)
-            .ok_or(AssemblerError::Kind(AssemblerErrorKind::GlobalIndexOutOfRange))?;
         self.globals
-            .push(Label { name, offset })
+            .push(Label { name, offset: index })
             .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
         Ok(())
     }
@@ -474,6 +549,47 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Ok(())
     }
 
+    fn declare_shared_function(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
+        if !matches!(self.block, BlockKind::None) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
+        }
+        if tokens.len() != 2 && tokens.len() != 4 {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+        }
+        let name = to_name(tokens.get(1).ok_or(AssemblerError::Kind(
+            AssemblerErrorKind::InvalidDirective,
+        ))?)?;
+        let index = if tokens.len() == 4 {
+            if tokens.get(2).copied() != Some("index") {
+                return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+            }
+            parse_word(tokens.get(3).ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidDirective,
+            ))?)?
+        } else {
+            self.next_free_shared_function_index()?
+        };
+
+        if index >= self.shared_function_count {
+            return Err(AssemblerError::Kind(
+                AssemblerErrorKind::FunctionIndexOutOfRange,
+            ));
+        }
+        if self.shared_funcs.iter().any(|entry| entry.index == index) {
+            return Err(AssemblerError::Kind(
+                AssemblerErrorKind::FunctionIndexDuplicate,
+            ));
+        }
+        self.shared_funcs
+            .push(FuncEntry {
+                name,
+                index,
+                defined: false,
+            })
+            .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxFunctionsExceeded))?;
+        Ok(())
+    }
+
     fn start_data(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
         if !matches!(self.block, BlockKind::Machine) {
             return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
@@ -489,6 +605,20 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Ok(())
     }
 
+    fn start_shared_data(&mut self, tokens: &[&str]) -> Result<(), AssemblerError> {
+        if !matches!(self.block, BlockKind::None) {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedDirective));
+        }
+        if tokens.len() != 2 {
+            return Err(AssemblerError::Kind(AssemblerErrorKind::InvalidDirective));
+        }
+        self.labels.clear();
+        self.data.clear();
+        self.cursor = 0;
+        self.block = BlockKind::SharedData;
+        Ok(())
+    }
+
     fn end_block(&mut self) -> Result<(), AssemblerError> {
         match self.block {
             BlockKind::Function => {
@@ -500,6 +630,17 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 let (_index, machine) = function.finish()?;
                 self.machine = Some(machine);
                 self.block = BlockKind::Machine;
+                Ok(())
+            }
+            BlockKind::SharedFunction => {
+                let function = self
+                    .shared_function
+                    .take()
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                let function = self.resolve_shared_fixups(function)?;
+                let (_index, program) = function.finish()?;
+                self.program = Some(program);
+                self.block = BlockKind::None;
                 Ok(())
             }
             BlockKind::Data => {
@@ -527,6 +668,31 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 self.block = BlockKind::Machine;
                 Ok(())
             }
+            BlockKind::SharedData => {
+                let program = self
+                    .program
+                    .as_mut()
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingProgram))?;
+                let data_base = program.program_free();
+                for label in self.labels.iter() {
+                    let absolute = data_base
+                        .checked_add(label.offset)
+                        .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+                    self.static_labels
+                        .push(Label {
+                            name: label.name.clone(),
+                            offset: absolute,
+                        })
+                        .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxLabelsExceeded))?;
+                }
+                if !self.data.is_empty() {
+                    let _ = program.add_shared_static(self.data.as_slice())?;
+                }
+                self.data.clear();
+                self.labels.clear();
+                self.block = BlockKind::None;
+                Ok(())
+            }
             BlockKind::Machine => {
                 for entry in self.funcs.iter() {
                     if !entry.defined {
@@ -552,6 +718,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         match self.block {
             BlockKind::Function => self.handle_function_instruction(tokens),
             BlockKind::Data => self.handle_data_line(tokens),
+            BlockKind::SharedFunction => self.handle_function_instruction(tokens),
+            BlockKind::SharedData => self.handle_data_line(tokens),
             _ => Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedInstruction)),
         }
     }
@@ -592,6 +760,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             "LOAD_STATIC" | "load_static" => self.emit_stack_target(tokens, Op::LoadStatic),
             "JUMP" | "jump" => self.emit_stack_target(tokens, Op::Jump),
             "CALL" | "call" => self.emit_stack_target(tokens, Op::Call),
+            "CALL_SHARED" | "call_shared" => self.emit_shared_stack_target(tokens, Op::CallShared),
             "BRLT" | "brlt" => self.emit_stack_target(tokens, Op::BranchLessThan),
             "BRLTE" | "brlte" => self.emit_stack_target(tokens, Op::BranchLessThanEq),
             "BRGT" | "brgt" => self.emit_stack_target(tokens, Op::BranchGreaterThan),
@@ -606,11 +775,27 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                     .cursor
                     .checked_add(width)
                     .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
-                let function = self
-                    .function
-                    .as_mut()
-                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
-                function.add_op(op)?;
+                match self.block {
+                    BlockKind::Function => {
+                        let function = self
+                            .function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(op)?;
+                    }
+                    BlockKind::SharedFunction => {
+                        let function = self
+                            .shared_function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(op)?;
+                    }
+                    _ => {
+                        return Err(AssemblerError::Kind(
+                            AssemblerErrorKind::UnexpectedInstruction,
+                        ))
+                    }
+                }
                 Ok(())
             }
         }
@@ -619,15 +804,27 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
     fn emit_stack_target(&mut self, tokens: &[&str], op: Op) -> Result<(), AssemblerError> {
         match tokens.len() {
             1 => {
-                let function = self
-                    .function
-                    .as_mut()
-                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
                 self.cursor = self
                     .cursor
                     .checked_add(1)
                     .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
-                function.add_op(op)?;
+                match self.block {
+                    BlockKind::Function => {
+                        let function = self
+                            .function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(op)?;
+                    }
+                    BlockKind::SharedFunction => {
+                        let function = self
+                            .shared_function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(op)?;
+                    }
+                    _ => return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedInstruction)),
+                }
                 Ok(())
             }
             2 => {
@@ -637,16 +834,91 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 let operand = self
                     .resolve_operand(operand_token)?
                     .ok_or(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction))?;
-                let function = self
-                    .function
-                    .as_mut()
-                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
                 self.cursor = self
                     .cursor
                     .checked_add(3)
                     .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
-                function.add_op(Op::Push(operand))?;
-                function.add_op(op)?;
+                match self.block {
+                    BlockKind::Function => {
+                        let function = self
+                            .function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(Op::Push(operand))?;
+                        function.add_op(op)?;
+                    }
+                    BlockKind::SharedFunction => {
+                        let function = self
+                            .shared_function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(Op::Push(operand))?;
+                        function.add_op(op)?;
+                    }
+                    _ => return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedInstruction)),
+                }
+                Ok(())
+            }
+            _ => Err(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction)),
+        }
+    }
+
+    fn emit_shared_stack_target(&mut self, tokens: &[&str], op: Op) -> Result<(), AssemblerError> {
+        match tokens.len() {
+            1 => {
+                self.cursor = self
+                    .cursor
+                    .checked_add(1)
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+                match self.block {
+                    BlockKind::Function => {
+                        let function = self
+                            .function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(op)?;
+                    }
+                    BlockKind::SharedFunction => {
+                        let function = self
+                            .shared_function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(op)?;
+                    }
+                    _ => return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedInstruction)),
+                }
+                Ok(())
+            }
+            2 => {
+                let operand_token = tokens.get(1).copied().ok_or(AssemblerError::Kind(
+                    AssemblerErrorKind::InvalidInstruction,
+                ))?;
+                let operand = self
+                    .resolve_shared_function_operand(operand_token)?
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction))?;
+                self.cursor = self
+                    .cursor
+                    .checked_add(3)
+                    .ok_or(AssemblerError::Kind(AssemblerErrorKind::CursorOverflow))?;
+                match self.block {
+                    BlockKind::Function => {
+                        let function = self
+                            .function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(Op::Push(operand))?;
+                        function.add_op(op)?;
+                    }
+                    BlockKind::SharedFunction => {
+                        let function = self
+                            .shared_function
+                            .as_mut()
+                            .ok_or(AssemblerError::Kind(AssemblerErrorKind::MissingFunction))?;
+                        function.add_op(Op::Push(operand))?;
+                        function.add_op(op)?;
+                    }
+                    _ => return Err(AssemblerError::Kind(AssemblerErrorKind::UnexpectedInstruction)),
+                }
                 Ok(())
             }
             _ => Err(AssemblerError::Kind(AssemblerErrorKind::InvalidInstruction)),
@@ -663,6 +935,27 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         let index = self.next_function_index;
         self.next_function_index = self
             .next_function_index
+            .checked_add(1)
+            .ok_or(AssemblerError::Kind(AssemblerErrorKind::FunctionIndexOutOfRange))?;
+        Ok(index)
+    }
+
+    fn next_free_shared_function_index(&mut self) -> Result<ProgramWord, AssemblerError> {
+        while self
+            .shared_funcs
+            .iter()
+            .any(|entry| entry.index == self.next_shared_function_index)
+        {
+            self.next_shared_function_index = self
+                .next_shared_function_index
+                .checked_add(1)
+                .ok_or(AssemblerError::Kind(
+                    AssemblerErrorKind::FunctionIndexOutOfRange,
+                ))?;
+        }
+        let index = self.next_shared_function_index;
+        self.next_shared_function_index = self
+            .next_shared_function_index
             .checked_add(1)
             .ok_or(AssemblerError::Kind(AssemblerErrorKind::FunctionIndexOutOfRange))?;
         Ok(index)
@@ -692,10 +985,57 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxFunctionsExceeded))
     }
 
+    fn mark_shared_function_defined(
+        &mut self,
+        name: &String<NAME_CAP>,
+        index: ProgramWord,
+    ) -> Result<(), AssemblerError> {
+        if let Some(entry) = self
+            .shared_funcs
+            .iter_mut()
+            .find(|entry| entry.name == *name)
+        {
+            if entry.defined {
+                return Err(AssemblerError::Kind(
+                    AssemblerErrorKind::FunctionAlreadyDefined,
+                ));
+            }
+            entry.defined = true;
+            if entry.index != index {
+                return Err(AssemblerError::Kind(
+                    AssemblerErrorKind::FunctionIndexDuplicate,
+                ));
+            }
+            return Ok(());
+        }
+        self.shared_funcs
+            .push(FuncEntry {
+                name: name.clone(),
+                index,
+                defined: true,
+            })
+            .map_err(|_| AssemblerError::Kind(AssemblerErrorKind::MaxFunctionsExceeded))
+    }
+
     fn resolve_fixups(
         &mut self,
         mut function: FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
     ) -> Result<FunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, AssemblerError> {
+        while let Some(fixup) = self.fixups.pop() {
+            let label = self
+                .labels
+                .iter()
+                .find(|label| label.name == fixup.name)
+                .ok_or(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))?;
+            function.patch_word(fixup.at, label.offset)?;
+        }
+        Ok(function)
+    }
+
+    fn resolve_shared_fixups(
+        &mut self,
+        mut function: SharedFunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
+    ) -> Result<SharedFunctionBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, AssemblerError> {
         while let Some(fixup) = self.fixups.pop() {
             let label = self
                 .labels
@@ -716,10 +1056,14 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             mnemonic,
             "PUSH"
                 | "push"
-                | "LOAD"
-                | "load"
-                | "STORE"
-                | "store"
+                | "LLOAD"
+                | "lload"
+                | "LSTORE"
+                | "lstore"
+                | "GLOAD"
+                | "gload"
+                | "GSTORE"
+                | "gstore"
                 | "SLOAD"
                 | "sload"
                 | "SSTORE"
@@ -734,8 +1078,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             ))?;
             if matches!(mnemonic, "SLOAD" | "sload" | "SSTORE" | "sstore") {
                 self.resolve_stack_operand(token)?
-            } else if matches!(mnemonic, "LOAD" | "load" | "STORE" | "store") {
-                self.resolve_global_operand(token)?
+            } else if matches!(mnemonic, "LLOAD" | "lload" | "LSTORE" | "lstore") {
+                self.resolve_local_operand(token)?
+            } else if matches!(mnemonic, "GLOAD" | "gload" | "GSTORE" | "gstore") {
+                self.resolve_shared_global_operand(token)?
             } else {
                 self.resolve_operand(token)?
             }
@@ -748,10 +1094,16 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
                 AssemblerErrorKind::InvalidInstruction,
             ))?),
             "POP" | "pop" => Op::Pop,
-            "LOAD" | "load" => Op::Load(operand.ok_or(AssemblerError::Kind(
+            "LLOAD" | "lload" => Op::LocalLoad(operand.ok_or(AssemblerError::Kind(
                 AssemblerErrorKind::InvalidInstruction,
             ))?),
-            "STORE" | "store" => Op::Store(operand.ok_or(AssemblerError::Kind(
+            "LSTORE" | "lstore" => Op::LocalStore(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
+            "GLOAD" | "gload" => Op::GlobalLoad(operand.ok_or(AssemblerError::Kind(
+                AssemblerErrorKind::InvalidInstruction,
+            ))?),
+            "GSTORE" | "gstore" => Op::GlobalStore(operand.ok_or(AssemblerError::Kind(
                 AssemblerErrorKind::InvalidInstruction,
             ))?),
             "SLOAD" | "sload" => Op::StackLoad(operand.ok_or(AssemblerError::Kind(
@@ -768,6 +1120,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
             "LOAD_STATIC" | "load_static" => Op::LoadStatic,
             "JUMP" | "jump" => Op::Jump,
             "CALL" | "call" => Op::Call,
+            "CALL_SHARED" | "call_shared" => Op::CallShared,
             "BRLT" | "brlt" => Op::BranchLessThan,
             "BRLTE" | "brlte" => Op::BranchLessThanEq,
             "BRGT" | "brgt" => Op::BranchGreaterThan,
@@ -831,6 +1184,20 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
     }
 
+    fn resolve_shared_function_operand(
+        &mut self,
+        token: &str,
+    ) -> Result<Option<ProgramWord>, AssemblerError> {
+        if let Ok(value) = parse_word(token) {
+            return Ok(Some(value));
+        }
+        let name = to_name(token)?;
+        if let Some(entry) = self.shared_funcs.iter().find(|entry| entry.name == name) {
+            return Ok(Some(entry.index));
+        }
+        Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
+    }
+
     fn resolve_stack_operand(&mut self, token: &str) -> Result<Option<ProgramWord>, AssemblerError> {
         if let Ok(value) = parse_word(token) {
             return Ok(Some(value));
@@ -842,27 +1209,42 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize, const 
         self.resolve_operand(token)
     }
 
-    fn resolve_global_operand(&mut self, token: &str) -> Result<Option<ProgramWord>, AssemblerError> {
+    fn resolve_local_operand(&mut self, token: &str) -> Result<Option<ProgramWord>, AssemblerError> {
         if let Ok(value) = parse_word(token) {
+            if matches!(self.block, BlockKind::SharedFunction) {
+                return Ok(Some(value));
+            }
             if value >= self.globals_size {
                 return Err(AssemblerError::Kind(
                     AssemblerErrorKind::GlobalIndexOutOfRange,
                 ));
             }
-            let offset = self
-                .globals_base
-                .checked_add(value)
-                .ok_or(AssemblerError::Kind(AssemblerErrorKind::GlobalIndexOutOfRange))?;
-            return Ok(Some(offset));
+            return Ok(Some(value));
         }
         let name = to_name(token)?;
         if let Some(entry) = self.globals.iter().find(|entry| entry.name == name) {
             return Ok(Some(entry.offset));
         }
+        Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
+    }
+
+    fn resolve_shared_global_operand(
+        &mut self,
+        token: &str,
+    ) -> Result<Option<ProgramWord>, AssemblerError> {
+        if let Ok(value) = parse_word(token) {
+            if value >= self.shared_globals_size {
+                return Err(AssemblerError::Kind(
+                    AssemblerErrorKind::GlobalIndexOutOfRange,
+                ));
+            }
+            return Ok(Some(value));
+        }
+        let name = to_name(token)?;
         if let Some(entry) = self.shared_globals.iter().find(|entry| entry.name == name) {
             return Ok(Some(entry.offset));
         }
-        self.resolve_operand(token)
+        Err(AssemblerError::Kind(AssemblerErrorKind::UnknownLabel))
     }
 }
 

@@ -17,7 +17,28 @@ const ASM_DATA_CAP: usize = 64;
 fn assemble_program(lines: &[&str]) -> StdVec<ProgramWord> {
     let mut buffer = [0u16; 256];
     let builder =
-        ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(&mut buffer, 1).unwrap();
+        ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(&mut buffer, 1, 0).unwrap();
+    let mut asm: Assembler<ASM_MACHINE_MAX, ASM_FUNCTION_MAX, ASM_LABEL_CAP, ASM_DATA_CAP> =
+        Assembler::new(builder);
+    for line in lines {
+        asm.add_line(line).unwrap();
+    }
+    let descriptor = asm.finish().unwrap();
+    buffer[..descriptor.length].to_vec()
+}
+
+fn assemble_program_with_shared(
+    lines: &[&str],
+    machine_count: ProgramWord,
+    shared_function_count: ProgramWord,
+) -> StdVec<ProgramWord> {
+    let mut buffer = [0u16; 256];
+    let builder = ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(
+        &mut buffer,
+        machine_count,
+        shared_function_count,
+    )
+    .unwrap();
     let mut asm: Assembler<ASM_MACHINE_MAX, ASM_FUNCTION_MAX, ASM_LABEL_CAP, ASM_DATA_CAP> =
         Assembler::new(builder);
     for line in lines {
@@ -34,6 +55,116 @@ fn run_single(
 ) -> Result<(), MachineError> {
     let mut program = Program::new(program, globals)?;
     program.call(0, 0, stack)
+}
+
+#[test]
+fn test_shared_function_call() -> Result<(), MachineError> {
+    let lines = [
+        ".shared shared0 0",
+        ".shared_func helper index 0",
+        "    GLOAD shared0",
+        "    RET 1",
+        ".end",
+        ".machine main locals 0 functions 1",
+        "    .func main index 0",
+        "        PUSH 0",
+        "        CALL_SHARED helper",
+        "        EXIT",
+        "    .end",
+        ".end",
+    ];
+    let program_words = assemble_program_with_shared(&lines, 1, 1);
+    let mut globals = [0u16; 4];
+    globals[0] = 42;
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
+    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
+    program.call(0, 0, &mut stack)?;
+    let value = stack.pop().ok_or(MachineError::StackUnderFlow)?;
+    assert_eq!(value, 42);
+    Ok(())
+}
+
+#[test]
+fn test_shared_function_index_out_of_range() -> Result<(), MachineError> {
+    let lines = [
+        ".shared_func helper index 0",
+        "    RET 0",
+        ".end",
+        ".machine main locals 0 functions 1",
+        "    .func main index 0",
+        "        PUSH 0",
+        "        CALL_SHARED 1",
+        "        EXIT",
+        "    .end",
+        ".end",
+    ];
+    let program_words = assemble_program_with_shared(&lines, 1, 1);
+    let mut globals = [0u16; 4];
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
+    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
+    let err = program.call(0, 0, &mut stack).unwrap_err();
+    assert!(matches!(err, MachineError::SharedFunctionIndexOutOfRange(_)));
+    Ok(())
+}
+
+#[test]
+fn test_shared_function_can_access_locals() -> Result<(), MachineError> {
+    let lines = [
+        ".shared_func helper index 0",
+        "    LLOAD 0",
+        "    RET 1",
+        ".end",
+        ".machine main locals 1 functions 1",
+        "    .func main index 0",
+        "        PUSH 99",
+        "        LSTORE 0",
+        "        PUSH 0",
+        "        CALL_SHARED helper",
+        "        EXIT",
+        "    .end",
+        ".end",
+    ];
+    let program_words = assemble_program_with_shared(&lines, 1, 1);
+    let mut globals = [0u16; 4];
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
+    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
+    program.call(0, 0, &mut stack)?;
+    let value = stack.pop().ok_or(MachineError::StackUnderFlow)?;
+    assert_eq!(value, 99);
+    Ok(())
+}
+
+#[test]
+fn test_shared_function_call_underflow() -> Result<(), MachineError> {
+    let lines = [
+        ".shared_func helper index 0",
+        "    RET 0",
+        ".end",
+        ".machine main locals 0 functions 1",
+        "    .func main index 0",
+        "        CALL_SHARED helper",
+        "        EXIT",
+        "    .end",
+        ".end",
+    ];
+    let program_words = assemble_program_with_shared(&lines, 1, 1);
+    let mut globals = [0u16; 4];
+    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
+    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
+    let err = program.call(0, 0, &mut stack).unwrap_err();
+    assert!(matches!(err, MachineError::StackUnderFlow));
+    Ok(())
+}
+
+#[test]
+fn test_invalid_program_version() {
+    let mut globals = [0u16; 1];
+    let program = [0u16, 0, 0, 0];
+    let err = match Program::new(&program, globals.as_mut_slice()) {
+        Ok(_) => panic!("expected error"),
+        Err(err) => err,
+    };
+    assert!(matches!(err, MachineError::InvalidProgramVersion(_)));
 }
 
 fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> StdVec<String> {
@@ -63,39 +194,39 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
 
     .func init index 0
         LOAD_STATIC init_red
-        STORE red
+        LSTORE red
         LOAD_STATIC init_green
-        STORE green
+        LSTORE green
         LOAD_STATIC init_blue
-        STORE blue
+        LSTORE blue
         LOAD_STATIC init_speed
-        STORE speed
+        LSTORE speed
         LOAD_STATIC init_brightness
-        STORE brightness
+        LSTORE brightness
         LOAD_STATIC init_led_count
-        STORE led_count
+        LSTORE led_count
         EXIT
     .end
 
     .func set_rgb index 2
-        STORE blue
-        STORE green
-        STORE red
+        LSTORE blue
+        LSTORE green
+        LSTORE red
         EXIT
     .end
 
     .func set_brightness index 3
-        STORE brightness
+        LSTORE brightness
         EXIT
     .end
 
     .func set_speed index 4
-        STORE speed
+        LSTORE speed
         EXIT
     .end
 
     .func set_led_count index 6
-        STORE led_count
+        LSTORE led_count
         EXIT
     .end
 
@@ -107,11 +238,11 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         .frame ticks 4
         SLOAD led_index
         SLOAD ticks
-        LOAD speed
-        LOAD led_count
+        LLOAD speed
+        LLOAD led_count
         MUL
         MOD
-        LOAD speed
+        LLOAD speed
         DIV
         BREQ match
         SLOAD sred
@@ -119,18 +250,18 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         SLOAD sblue
         RET 3
         match:
-        LOAD red
-        LOAD brightness
+        LLOAD red
+        LLOAD brightness
         MUL
         PUSH 100
         DIV
-        LOAD green
-        LOAD brightness
+        LLOAD green
+        LLOAD brightness
         MUL
         PUSH 100
         DIV
-        LOAD blue
-        LOAD brightness
+        LLOAD blue
+        LLOAD brightness
         MUL
         PUSH 100
         DIV
@@ -152,19 +283,19 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
 #[test]
 fn test_locals_are_machine_scoped() -> Result<(), MachineError> {
     let mut buffer = [0u16; 256];
-    let builder = ProgramBuilder::<2, 1>::new(&mut buffer, 2).unwrap();
+    let builder = ProgramBuilder::<2, 1>::new(&mut buffer, 2, 0).unwrap();
     let mut asm: Assembler<2, 1, 16, 16> = Assembler::new(builder);
 
     asm.add_line(".machine first locals 1 functions 1").unwrap();
     asm.add_line(".func set index 0").unwrap();
-    asm.add_line("STORE 0").unwrap();
+    asm.add_line("LSTORE 0").unwrap();
     asm.add_line("EXIT").unwrap();
     asm.add_line(".end").unwrap();
     asm.add_line(".end").unwrap();
 
     asm.add_line(".machine second locals 1 functions 1").unwrap();
     asm.add_line(".func set index 0").unwrap();
-    asm.add_line("STORE 0").unwrap();
+    asm.add_line("LSTORE 0").unwrap();
     asm.add_line("EXIT").unwrap();
     asm.add_line(".end").unwrap();
     asm.add_line(".end").unwrap();
@@ -198,9 +329,12 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     const DATA_CAP: usize = 32;
 
     let mut buffer = [0u16; 512];
-    let builder =
-        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as ProgramWord)
-            .unwrap();
+    let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
+        &mut buffer,
+        MACHINE_COUNT as ProgramWord,
+        0,
+    )
+    .unwrap();
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
 
@@ -275,15 +409,15 @@ fn test_init_get_color() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 3 functions 2",
         ".func set_rgb index 0",
-        "STORE 2",
-        "STORE 1",
-        "STORE 0",
+        "LSTORE 2",
+        "LSTORE 1",
+        "LSTORE 0",
         "EXIT",
         ".end",
         ".func get_rgb index 1",
-        "LOAD 0",
-        "LOAD 1",
-        "LOAD 2",
+        "LLOAD 0",
+        "LLOAD 1",
+        "LLOAD 2",
         "EXIT",
         ".end",
         ".end",
@@ -335,18 +469,18 @@ fn test_init_get_color2() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 3 functions 2",
         ".func set_rgb index 0",
-        "STORE 2",
-        "STORE 1",
-        "STORE 0",
+        "LSTORE 2",
+        "LSTORE 1",
+        "LSTORE 0",
         "EXIT",
         ".end",
         ".func get_rgb index 1",
-        "LOAD 0",
+        "LLOAD 0",
         "ADD",
         "PUSH 255",
         "MOD",
-        "LOAD 1",
-        "LOAD 2",
+        "LLOAD 1",
+        "LLOAD 2",
         "EXIT",
         ".end",
         ".end",
@@ -564,11 +698,11 @@ fn op_sstore_named() -> Result<(), MachineError> {
 }
 
 #[test]
-fn op_load() -> Result<(), MachineError> {
+fn op_lload() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 1 functions 1",
         ".func main index 0",
-        "LOAD 0",
+        "LLOAD 0",
         "EXIT",
         ".end",
         ".end",
@@ -581,12 +715,12 @@ fn op_load() -> Result<(), MachineError> {
 }
 
 #[test]
-fn op_store() -> Result<(), MachineError> {
+fn op_lstore() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 1 functions 1",
         ".func main index 0",
         "PUSH 7",
-        "STORE 0",
+        "LSTORE 0",
         "EXIT",
         ".end",
         ".end",
@@ -600,14 +734,14 @@ fn op_store() -> Result<(), MachineError> {
 }
 
 #[test]
-fn op_load_named_global() -> Result<(), MachineError> {
+fn op_lload_named_local() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 2 functions 1",
         ".local red 0",
         ".local blue 1",
         ".func main index 0",
-        "LOAD red",
-        "LOAD blue",
+        "LLOAD red",
+        "LLOAD blue",
         "EXIT",
         ".end",
         ".end",
@@ -620,16 +754,16 @@ fn op_load_named_global() -> Result<(), MachineError> {
 }
 
 #[test]
-fn op_store_named_global() -> Result<(), MachineError> {
+fn op_lstore_named_local() -> Result<(), MachineError> {
     let program = assemble_program(&[
         ".machine main locals 2 functions 1",
         ".local red 0",
         ".local blue 1",
         ".func main index 0",
         "PUSH 55",
-        "STORE red",
+        "LSTORE red",
         "PUSH 77",
-        "STORE blue",
+        "LSTORE blue",
         "EXIT",
         ".end",
         ".end",

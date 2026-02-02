@@ -180,6 +180,7 @@ async fn main(spawner: Spawner) -> ! {
                 panic!("flash storage init failed");
             }
         };
+        //storage.format(); // Uncomment if needed to clear stored program
         if clear_program {
             if storage.format().is_err() {
                 panic!("flash storage watchdog reset format failed");

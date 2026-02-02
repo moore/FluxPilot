@@ -358,7 +358,12 @@ pub fn get_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptorJs, JsVal
 #[wasm_bindgen]
 pub fn compile_program(source: &str, buffer: &mut [u16]) -> Result<ProgramDescriptorJs, JsValue> {
     let machine_count = count_machines(source)?;
-    let builder = ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(buffer, machine_count)
+    let shared_function_count = count_shared_functions(source)?;
+    let builder = ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(
+        buffer,
+        machine_count,
+        shared_function_count,
+    )
         .map_err(|_| JsValue::from_str("program buffer too small for machine count"))?;
     let mut assembler: Assembler<
         ASM_MACHINE_MAX,
@@ -378,9 +383,12 @@ pub fn compile_program(source: &str, buffer: &mut [u16]) -> Result<ProgramDescri
 fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsValue> {
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 2;
-    let program_builder =
-        ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(buffer, MACHINE_COUNT as u16)
-            .map_err(|_| JsValue::from_str("could not get machine builder"))?;
+    let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
+        buffer,
+        MACHINE_COUNT as u16,
+        0,
+    )
+    .map_err(|_| JsValue::from_str("could not get machine builder"))?;
 
     let globals_size = 3;
     let machine = program_builder
@@ -391,13 +399,13 @@ fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsV
         .new_function()
         .map_err(|_| JsValue::from_str("could not get function builder"))?;
     function
-        .add_op(Op::Store(0))
+        .add_op(Op::LocalStore(0))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
-        .add_op(Op::Store(1))
+        .add_op(Op::LocalStore(1))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
-        .add_op(Op::Store(2))
+        .add_op(Op::LocalStore(2))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
         .add_op(Op::Exit)
@@ -410,13 +418,13 @@ fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsV
         .new_function()
         .map_err(|_| JsValue::from_str("could not get function builder"))?;
     function
-        .add_op(Op::Load(0))
+        .add_op(Op::LocalLoad(0))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
-        .add_op(Op::Load(1))
+        .add_op(Op::LocalLoad(1))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
-        .add_op(Op::Load(2))
+        .add_op(Op::LocalLoad(2))
         .map_err(|_| JsValue::from_str("could not add op"))?;
     function
         .add_op(Op::Exit)
@@ -447,6 +455,46 @@ fn count_machines(source: &str) -> Result<u16, JsValue> {
         return Err(JsValue::from_str("no .machine directive found"));
     }
     Ok(count)
+}
+
+fn count_shared_functions(source: &str) -> Result<u16, JsValue> {
+    let mut max_index: u16 = 0;
+    let mut has_shared = false;
+    let mut next_auto: u16 = 0;
+    for line in source.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if !line.starts_with(".shared_func") && !line.starts_with(".shared_func_decl") {
+            continue;
+        }
+        has_shared = true;
+        let mut tokens = line.split_whitespace();
+        let _ = tokens.next(); // directive
+        let _ = tokens.next(); // name
+        if tokens.next() == Some("index") {
+            let token = tokens
+                .next()
+                .ok_or_else(|| JsValue::from_str("invalid shared function index"))?;
+            let index: u16 = token
+                .parse()
+                .map_err(|_| JsValue::from_str("invalid shared function index"))?;
+            if index > max_index {
+                max_index = index;
+            }
+        } else {
+            if next_auto > max_index {
+                max_index = next_auto;
+            }
+            next_auto = next_auto
+                .checked_add(1)
+                .ok_or_else(|| JsValue::from_str("shared function count overflow"))?;
+        }
+    }
+    if !has_shared {
+        return Ok(0);
+    }
+    max_index
+        .checked_add(1)
+        .ok_or_else(|| JsValue::from_str("shared function count overflow"))
 }
 
 fn assembler_error_to_js(err: AssemblerError) -> JsValue {

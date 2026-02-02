@@ -52,39 +52,39 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
 
     .func init index 0
         LOAD_STATIC init_red
-        STORE red
+        LSTORE red
         LOAD_STATIC init_green
-        STORE green
+        LSTORE green
         LOAD_STATIC init_blue
-        STORE blue
+        LSTORE blue
         LOAD_STATIC init_speed
-        STORE speed
+        LSTORE speed
         LOAD_STATIC init_brightness
-        STORE brightness
+        LSTORE brightness
         LOAD_STATIC init_led_count
-        STORE led_count
+        LSTORE led_count
         EXIT
     .end
 
     .func set_rgb index 2
-        STORE blue
-        STORE green
-        STORE red
+        LSTORE blue
+        LSTORE green
+        LSTORE red
         EXIT
     .end
 
     .func set_brightness index 3
-        STORE brightness
+        LSTORE brightness
         EXIT
     .end
 
     .func set_speed index 4
-        STORE speed
+        LSTORE speed
         EXIT
     .end
 
     .func set_led_count index 6
-        STORE led_count
+        LSTORE led_count
         EXIT
     .end
 
@@ -96,11 +96,11 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         .frame ticks 4
         SLOAD led_index
         SLOAD ticks
-        LOAD speed
-        LOAD led_count
+        LLOAD speed
+        LLOAD led_count
         MUL
         MOD
-        LOAD speed
+        LLOAD speed
         DIV
         BREQ match
         SLOAD sred
@@ -108,18 +108,18 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         SLOAD sblue
         RET 3
         match:
-        LOAD red
-        LOAD brightness
+        LLOAD red
+        LLOAD brightness
         MUL
         PUSH 100
         DIV
-        LOAD green
-        LOAD brightness
+        LLOAD green
+        LLOAD brightness
         MUL
         PUSH 100
         DIV
-        LOAD blue
-        LOAD brightness
+        LLOAD blue
+        LLOAD brightness
         MUL
         PUSH 100
         DIV
@@ -146,9 +146,12 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut buffer = [0u16; 30];
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 3;
-    let program_builder =
-        ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as u16)
-            .expect("could not get machine builder");
+    let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
+        &mut buffer,
+        MACHINE_COUNT as u16,
+        0,
+    )
+    .expect("could not get machine builder");
 
     let globals_size = 3;
     let machine = program_builder
@@ -164,18 +167,18 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut function = machine
         .new_function()
         .expect("could not get fucntion builder");
-    function.add_op(Op::Load(0)).expect("could not add op");
-    function.add_op(Op::Load(1)).expect("could not add op");
-    function.add_op(Op::Load(2)).expect("could not add op");
+    function.add_op(Op::LocalLoad(0)).expect("could not add op");
+    function.add_op(Op::LocalLoad(1)).expect("could not add op");
+    function.add_op(Op::LocalLoad(2)).expect("could not add op");
     function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 
     let mut function = machine
         .new_function()
         .expect("could not get fucntion builder");
-    function.add_op(Op::Store(0)).expect("could not add op");
-    function.add_op(Op::Store(1)).expect("could not add op");
-    function.add_op(Op::Store(2)).expect("could not add op");
+    function.add_op(Op::LocalStore(0)).expect("could not add op");
+    function.add_op(Op::LocalStore(1)).expect("could not add op");
+    function.add_op(Op::LocalStore(2)).expect("could not add op");
     function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 
@@ -317,9 +320,12 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     const STACK_CAP: usize = 32;
 
     let mut buffer = [0u16; 512];
-    let builder =
-        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as ProgramWord)
-            .unwrap();
+    let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
+        &mut buffer,
+        MACHINE_COUNT as ProgramWord,
+        0,
+    )
+    .unwrap();
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
 
@@ -408,9 +414,12 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
     const DATA_CAP: usize = 16;
 
     let mut buffer = [0u16; 256];
-    let builder =
-        ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(&mut buffer, MACHINE_COUNT as ProgramWord)
-            .unwrap();
+    let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
+        &mut buffer,
+        MACHINE_COUNT as ProgramWord,
+        0,
+    )
+    .unwrap();
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
 

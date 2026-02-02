@@ -360,25 +360,25 @@ export async function initDeck() {
 
 .func init index 0
     LOAD_STATIC init_red
-    STORE 0
+    LSTORE 0
     LOAD_STATIC init_green
-    STORE 1
+    LSTORE 1
     LOAD_STATIC init_blue
-    STORE 2
+    LSTORE 2
     LOAD_STATIC init_brightness
-    STORE 3
+    LSTORE 3
     EXIT
 .end
 
 .func set_rgb index 2
-    STORE 2
-    STORE 1
-    STORE 0
+    LSTORE 2
+    LSTORE 1
+    LSTORE 0
     EXIT
 .end
 
 .func set_brightness index 3
-    STORE 3
+    LSTORE 3
     EXIT
 .end
 
@@ -399,19 +399,19 @@ export async function initDeck() {
     even:
     PUSH 4
     DIV
-    LOAD 0
+    LLOAD 0
     ADD
-    LOAD 3
+    LLOAD 3
     MUL
     PUSH 100
     DIV
-    LOAD 1
-    LOAD 3
+    LLOAD 1
+    LLOAD 3
     MUL
     PUSH 100
     DIV
-    LOAD 2
-    LOAD 3
+    LLOAD 2
+    LLOAD 3
     MUL
     PUSH 100
     DIV

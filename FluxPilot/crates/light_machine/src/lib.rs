@@ -96,12 +96,15 @@ pub enum Ops {
     Mod,
     Add,
     Subtract,
-    Load,
-    Store,
+    LocalLoad,
+    LocalStore,
+    GlobalLoad,
+    GlobalStore,
     LoadStatic,
     Jump,
     Exit,
     Call,
+    CallShared,
     StackLoad,
     StackStore,
     Dup,
@@ -154,15 +157,24 @@ pub enum MachineError {
     GlobalsBufferTooSmall(ProgramWord),
     #[error("index {0} out of range for machine index")]
     MachineIndexOutOfRange(ProgramWord),
+    #[error("index {0} out of range for shared function index")]
+    SharedFunctionIndexOutOfRange(ProgramWord),
+    #[error("shared globals access out of range: {0}")]
+    SharedGlobalsAccessOutOfRange(ProgramWord),
     #[error("stack value {0} does not fit in a program word")]
     StackValueTooLargeForProgramWord(StackWord),
     #[error("stack value {0} does not fit in usize")]
     StackValueTooLargeForUsize(StackWord),
+    #[error("program version {0} is not supported")]
+    InvalidProgramVersion(ProgramWord),
 }
 
-pub const MACHINE_COUNT_OFFSET: usize = 0;
+pub const PROGRAM_VERSION: ProgramWord = 1;
+pub const VERSION_OFFSET: usize = 0;
+pub const MACHINE_COUNT_OFFSET: usize = VERSION_OFFSET + 1;
 pub const GLOBALS_SIZE_OFFSET: usize = MACHINE_COUNT_OFFSET + 1;
-pub const MACHINE_TABLE_OFFSET: usize = GLOBALS_SIZE_OFFSET + 1;
+pub const SHARED_FUNCTION_COUNT_OFFSET: usize = GLOBALS_SIZE_OFFSET + 1;
+pub const MACHINE_TABLE_OFFSET: usize = SHARED_FUNCTION_COUNT_OFFSET + 1;
 pub const MACHINE_FUNCTIONS_OFFSET: usize = 2;
 
 const INIT_OFFSET: usize = 0;
@@ -227,6 +239,7 @@ pub struct Program<'a, 'b> {
     static_data: &'a [ProgramWord],
     globals: &'b mut [ProgramWord],
     frame_pointer: StackWord,
+    locals_base: ProgramWord,
 }
 
 impl<'a, 'b> Program<'a, 'b> {
@@ -234,6 +247,12 @@ impl<'a, 'b> Program<'a, 'b> {
         static_data: &'a [ProgramWord],
         globals: &'b mut [ProgramWord],
     ) -> Result<Self, MachineError> {
+        let Some(version) = static_data.get(VERSION_OFFSET) else {
+            return Err(MachineError::OutOfBoudsStaticRead(VERSION_OFFSET));
+        };
+        if *version != PROGRAM_VERSION {
+            return Err(MachineError::InvalidProgramVersion(*version));
+        }
         let Some(globals_size) = static_data.get(GLOBALS_SIZE_OFFSET) else {
             return Err(MachineError::OutOfBoudsStaticRead(GLOBALS_SIZE_OFFSET));
         };
@@ -246,6 +265,7 @@ impl<'a, 'b> Program<'a, 'b> {
             static_data,
             globals,
             frame_pointer: 0,
+            locals_base: 0,
         })
     }
 
@@ -256,6 +276,42 @@ impl<'a, 'b> Program<'a, 'b> {
         };
 
         Ok(*count)
+    }
+
+    pub fn shared_function_count(&self) -> Result<ProgramWord, MachineError> {
+        let Some(count) = self
+            .static_data
+            .get(SHARED_FUNCTION_COUNT_OFFSET)
+        else {
+            return Err(MachineError::OutOfBoudsStaticRead(
+                SHARED_FUNCTION_COUNT_OFFSET,
+            ));
+        };
+        Ok(*count)
+    }
+
+    fn shared_function_table_offset(&self) -> Result<usize, MachineError> {
+        let machine_count = self.machine_count()? as usize;
+        MACHINE_TABLE_OFFSET
+            .checked_add(machine_count)
+            .ok_or(MachineError::OutOfBoudsStaticRead(MACHINE_TABLE_OFFSET))
+    }
+
+    fn machine_globals_offset(
+        &self,
+        machine_number: ProgramWord,
+    ) -> Result<ProgramWord, MachineError> {
+        if machine_number > self.machine_count()? {
+            return Err(MachineError::MachineIndexOutOfRange(machine_number));
+        };
+        let Some(machine_slot) = (machine_number as usize).checked_add(MACHINE_TABLE_OFFSET) else {
+            return Err(MachineError::OutOfBoudsStaticRead(machine_number as usize));
+        };
+        let machine_index = read_static(machine_slot, self.static_data)?;
+        let globals_offset_index = machine_index
+            .checked_add(1)
+            .ok_or(MachineError::OutOfBoudsStaticRead(machine_index as usize))?;
+        read_static(globals_offset_index as usize, self.static_data)
     }
 
     fn get_function_entry(
@@ -278,6 +334,24 @@ impl<'a, 'b> Program<'a, 'b> {
             return Err(MachineError::OutOfBoudsStaticRead(machine_index as usize));
         };
         let entry_point = read_static(index_function_index, self.static_data)?;
+        Ok(entry_point as usize)
+    }
+
+    fn get_shared_function_entry(
+        &self,
+        function_number: ProgramWord,
+    ) -> Result<usize, MachineError> {
+        let shared_function_count = self.shared_function_count()?;
+        if function_number >= shared_function_count {
+            return Err(MachineError::SharedFunctionIndexOutOfRange(
+                function_number,
+            ));
+        }
+        let table_offset = self.shared_function_table_offset()?;
+        let entry_index = table_offset
+            .checked_add(function_number as usize)
+            .ok_or(MachineError::OutOfBoudsStaticRead(table_offset))?;
+        let entry_point = read_static(entry_index, self.static_data)?;
         Ok(entry_point as usize)
     }
 
@@ -351,6 +425,8 @@ impl<'a, 'b> Program<'a, 'b> {
         stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let mut pc = entry_point;
+        let locals_base = self.machine_globals_offset(machine_number)?;
+        self.locals_base = locals_base;
 
         loop {
             let word = read_static(pc, self.static_data)?;
@@ -468,7 +544,50 @@ impl<'a, 'b> Program<'a, 'b> {
                     let (lhs, rhs) = pop2(stack)?;
                     push(stack, lhs.wrapping_sub(rhs))?;
                 }
-                Ops::Load => {
+                Ops::LocalLoad => {
+                    pc = next_pc(pc)?;
+                    let offset = read_static(pc, self.static_data)?;
+
+                    const {
+                        assert!(size_of::<ProgramWord>() <= size_of::<usize>());
+                    }
+                    let index = self
+                        .locals_base
+                        .checked_add(offset)
+                        .ok_or(MachineError::OutOfBoundsGlobalsAccess(
+                            usize::from(self.locals_base),
+                        ))?;
+                    // SAFTY: const assersion prouves this is safe
+                    let index = index as usize;
+
+                    let word = read_global(index, self.globals)?;
+
+                    push(stack, program_word_to_stack(word))?;
+                }
+                Ops::LocalStore => {
+                    pc = next_pc(pc)?;
+                    let offset = read_static(pc, self.static_data)?;
+
+                    const { assert!(size_of::<ProgramWord>() <= size_of::<usize>()) }
+                    let index = self
+                        .locals_base
+                        .checked_add(offset)
+                        .ok_or(MachineError::OutOfBoundsGlobalsAccess(
+                            usize::from(self.locals_base),
+                        ))?;
+                    // SAFTY: const assersion prouves this is safe
+                    let index = index as usize;
+
+                    let word = stack_word_to_program(pop(stack)?)?;
+
+                    set_value(
+                        self.globals,
+                        index,
+                        word,
+                        MachineError::OutOfBoundsGlobalsAccess(index),
+                    )?;
+                }
+                Ops::GlobalLoad => {
                     pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
 
@@ -482,7 +601,7 @@ impl<'a, 'b> Program<'a, 'b> {
 
                     push(stack, program_word_to_stack(word))?;
                 }
-                Ops::Store => {
+                Ops::GlobalStore => {
                     pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
 
@@ -588,6 +707,41 @@ impl<'a, 'b> Program<'a, 'b> {
                     let entry_point = self.get_function_entry(machine_number, function_index)?;
                     self.run(machine_number, entry_point, stack)?;
                     // Restore caller's frame pointer after returning.
+                    self.frame_pointer = saved_frame_pointer;
+                    pc = stack_word_to_program_index(return_pc)?;
+                    continue;
+                }
+                Ops::CallShared => {
+                    // Stack convention: ... args, arg_count, shared_func_index
+                    let function_index =
+                        stack_word_to_program(pop(stack)?)?;
+                    let arg_count = stack_word_to_usize(pop(stack)?)?;
+                    let arg_start = stack
+                        .len()
+                        .checked_sub(arg_count)
+                        .ok_or(MachineError::StackUnderFlow)?;
+                    let saved_frame_pointer = self.frame_pointer;
+                    let return_pc = ProgramWord::try_from(next_pc(pc)?)
+                        .map_err(|_| MachineError::StackOverflow)?;
+                    let return_pc = program_word_to_stack(return_pc);
+                    stack
+                        .insert(arg_start, return_pc)
+                        .map_err(|_| MachineError::StackOverflow)?;
+                    let saved_pointer_index = arg_start
+                        .checked_add(1)
+                        .ok_or(MachineError::StackOverflow)?;
+                    stack
+                        .insert(saved_pointer_index, saved_frame_pointer)
+                        .map_err(|_| MachineError::StackOverflow)?;
+                    let new_frame_pointer = arg_start
+                        .checked_add(2)
+                        .ok_or(MachineError::StackOverflow)?;
+                    let new_frame_pointer =
+                        StackWord::try_from(new_frame_pointer)
+                            .map_err(|_| MachineError::StackOverflow)?;
+                    self.frame_pointer = new_frame_pointer;
+                    let entry_point = self.get_shared_function_entry(function_index)?;
+                    self.run(machine_number, entry_point, stack)?;
                     self.frame_pointer = saved_frame_pointer;
                     pc = stack_word_to_program_index(return_pc)?;
                     continue;

@@ -20,15 +20,21 @@ Programs are stored in a single contiguous `ProgramWord` array. The runtime is g
 - `static_data`: the program `ProgramWord` array.
 - `globals`: a mutable `ProgramWord` array for persistent per-program state.
 
-The program header:
+The program header (versioned):
 
 ```
-[0] MACHINE_COUNT
-[1] GLOBALS_SIZE (total globals required for all machines)
-[2..] MACHINE_TABLE (machine_count entries)
+[0] VERSION
+[1] MACHINE_COUNT
+[2] GLOBALS_SIZE (total globals required for all machines, including shared globals)
+[3] SHARED_FUNCTION_COUNT
+[4..] MACHINE_TABLE (machine_count entries)
+[... ] SHARED_FUNCTION_TABLE (shared_function_count entries)
 ```
 
 Each entry in the machine table points to the start of a machine block.
+Shared function table entries point to program-scoped shared function entry points.
+See `FluxPilot/crates/light_machine/shared_functions_plan.md` for the detailed
+shared function semantics.
 
 ## Machine block layout
 
@@ -58,6 +64,12 @@ The VM maintains a `frame_pointer` that indexes into the current stack.
 `SLOAD` and `SSTORE` use offsets relative to the frame pointer.
 
 `frame_pointer` is a `StackWord` and is interpreted as a `usize` index (checked).
+
+### Machine locals pointer
+
+The VM maintains a machine locals base pointer (`mlp`) that is set on entry to a
+machine (and shared functions called from that machine). `LLOAD` and `LSTORE`
+use `mlp + offset` to access machine-local globals.
 
 ## Calling convention
 
@@ -104,8 +116,10 @@ invalid indices are runtime errors.
 - `SWAP`: swap top two values.
 - `SLOAD <offset>`: push `stack[frame_pointer + offset]`.
 - `SSTORE <offset>`: store top at `stack[frame_pointer + offset]`, then pop top.
-- `LOAD <addr>`: push `globals[addr]`.
-- `STORE <addr>`: pop and store to `globals[addr]`.
+- `LLOAD <offset>`: push `globals[mlp + offset]`.
+- `LSTORE <offset>`: pop and store to `globals[mlp + offset]`.
+- `GLOAD <addr>`: push `globals[addr]`.
+- `GSTORE <addr>`: pop and store to `globals[addr]`.
 - `LOAD_STATIC`: pop `addr`, push `static_data[addr]`.
 
 ### Control flow
