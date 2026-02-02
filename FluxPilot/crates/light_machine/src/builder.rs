@@ -38,8 +38,10 @@ impl From<FunctionIndex> for u32 {
 ///
 pub struct ProgramBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     buffer: &'a mut [ProgramWord],
-    machine_count: ProgramWord,
-    next_machine_builder: ProgramWord,
+    instance_count: ProgramWord,
+    type_count: ProgramWord,
+    next_type_builder: ProgramWord,
+    next_instance_number: ProgramWord,
     free: ProgramWord,
     descriptor: ProgramDescriptor<MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
     shared_globals_size: ProgramWord,
@@ -52,7 +54,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
 {
     pub fn new(
         buffer: &'a mut [ProgramWord],
-        machine_count: ProgramWord,
+        instance_count: ProgramWord,
+        type_count: ProgramWord,
         shared_function_count: ProgramWord,
     ) -> Result<Self, MachineBuilderError> {
         // Assure `Words` can be cast to `usize`
@@ -63,11 +66,22 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         // NOTE: we could probbly make some assumption about
         // the smallest usafal machine and ensure we have room
         // for that too.
-        let Some(required) = (machine_count as usize)
-            .checked_add(shared_function_count as usize)
-            .and_then(|count| count.checked_add(MACHINE_TABLE_OFFSET)) else {
+        let instance_table_words = (instance_count as usize)
+            .checked_mul(2)
+            .ok_or(MachineBuilderError::MachineCountOverflowsWord(
+                instance_count as usize,
+            ))?;
+        let type_table_words = (type_count as usize)
+            .checked_mul(2)
+            .ok_or(MachineBuilderError::MachineCountOverflowsWord(
+                type_count as usize,
+            ))?;
+        let Some(required) = HEADER_WORDS
+            .checked_add(instance_table_words)
+            .and_then(|count| count.checked_add(type_table_words))
+            .and_then(|count| count.checked_add(shared_function_count as usize)) else {
             return Err(MachineBuilderError::MachineCountOverflowsWord(
-                machine_count as usize,
+                instance_count as usize,
             ));
         };
         if buffer.len() <= required {
@@ -78,7 +92,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         set_value(
             buffer,
             MACHINE_COUNT_OFFSET,
-            machine_count,
+            instance_count,
             MachineBuilderError::BufferTooSmall,
         )?;
         set_value(buffer, GLOBALS_SIZE_OFFSET, 0, MachineBuilderError::BufferTooSmall)?; // Globals size
@@ -88,19 +102,58 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             shared_function_count,
             MachineBuilderError::BufferTooSmall,
         )?;
-        let Some(free) = machine_count
+        set_value(
+            buffer,
+            TYPE_COUNT_OFFSET,
+            type_count,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        let instance_table_offset = ProgramWord::try_from(HEADER_WORDS)
+            .map_err(|_| MachineBuilderError::MachineCountOverflowsWord(HEADER_WORDS))?;
+        set_value(
+            buffer,
+            INSTANCE_TABLE_OFFSET,
+            instance_table_offset,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        let instance_table_words = ProgramWord::try_from(instance_table_words)
+            .map_err(|_| MachineBuilderError::MachineCountOverflowsWord(instance_table_words))?;
+        let type_table_offset = instance_table_offset
+            .checked_add(instance_table_words)
+            .ok_or(MachineBuilderError::MachineCountOverflowsWord(
+                instance_count as usize,
+            ))?;
+        set_value(
+            buffer,
+            TYPE_TABLE_OFFSET,
+            type_table_offset,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        let type_table_words = ProgramWord::try_from(type_table_words)
+            .map_err(|_| MachineBuilderError::MachineCountOverflowsWord(type_table_words))?;
+        let shared_function_table_offset = type_table_offset
+            .checked_add(type_table_words)
+            .ok_or(MachineBuilderError::MachineCountOverflowsWord(
+                type_count as usize,
+            ))?;
+        set_value(
+            buffer,
+            SHARED_FUNCTION_TABLE_OFFSET,
+            shared_function_table_offset,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        let free = shared_function_table_offset
             .checked_add(shared_function_count)
-            .and_then(|count| count.checked_add(MACHINE_TABLE_OFFSET as ProgramWord))
-        else {
-            return Err(MachineBuilderError::MachineCountOverflowsWord(
-                machine_count as usize,
-            ));
-        };
+            .ok_or(MachineBuilderError::MachineCountOverflowsWord(
+                shared_function_count as usize,
+            ))?;
         Ok(Self {
             buffer,
-            machine_count,
+            instance_count,
+            type_count,
             free,
-            next_machine_builder: 0,
+            next_type_builder: 0,
+            next_instance_number: 0,
             descriptor: ProgramDescriptor::new(),
             shared_globals_size: 0,
             shared_function_count,
@@ -117,7 +170,7 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     }
 
     pub fn set_shared_globals_size(&mut self, shared_globals_size: ProgramWord) -> Result<(), MachineBuilderError> {
-        if self.next_machine_builder != 0 || self.next_shared_function_number != 0 {
+        if self.next_type_builder != 0 || self.next_instance_number != 0 || self.next_shared_function_number != 0 {
             return Err(MachineBuilderError::MachineCountExceeded);
         }
         set_value(
@@ -136,37 +189,140 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         globals_size: ProgramWord,
     ) -> Result<MachineBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError>
     {
-        if self.next_machine_builder >= self.machine_count {
+        if self.next_type_builder >= self.type_count {
             return Err(MachineBuilderError::MachineCountExceeded);
         }
-        let Some(_next_machine_builder) = self.next_machine_builder.checked_add(1) else {
+        if self.next_instance_number >= self.instance_count {
+            return Err(MachineBuilderError::MachineCountExceeded);
+        }
+        let Some(_next_type_builder) = self.next_type_builder.checked_add(1) else {
             return Err(MachineBuilderError::MachineCountOverflowsWord(
-                self.next_machine_builder as usize,
+                self.next_type_builder as usize,
             ));
         };
-        let Some(machine_table_index) = (self.next_machine_builder as usize)
-            .checked_add(MACHINE_TABLE_OFFSET)
-        else {
-            return Err(MachineBuilderError::BufferTooSmall);
+        let Some(_next_instance_number) = self.next_instance_number.checked_add(1) else {
+            return Err(MachineBuilderError::MachineCountOverflowsWord(
+                self.next_instance_number as usize,
+            ));
         };
-        set_value(
-            self.buffer,
-            machine_table_index,
-            self.free as ProgramWord,
-            MachineBuilderError::BufferTooSmall,
-        )?;
-        let globals_offset = *self
+        let instance_table_offset = read_static(INSTANCE_TABLE_OFFSET, self.buffer)
+            .map_err(|_| MachineBuilderError::BufferTooSmall)? as usize;
+        let instance_entry_index = (self.next_instance_number as usize)
+            .checked_mul(2)
+            .and_then(|offset| instance_table_offset.checked_add(offset))
+            .ok_or(MachineBuilderError::BufferTooSmall)?;
+        let globals_base = *self
             .buffer
             .get(GLOBALS_SIZE_OFFSET)
             .ok_or(MachineBuilderError::BufferTooSmall)?;
+        let type_id = self.next_type_builder;
+        set_value(
+            self.buffer,
+            instance_entry_index,
+            type_id,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        set_value(
+            self.buffer,
+            instance_entry_index
+                .checked_add(1)
+                .ok_or(MachineBuilderError::BufferTooSmall)?,
+            globals_base,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        let type_table_offset = read_static(TYPE_TABLE_OFFSET, self.buffer)
+            .map_err(|_| MachineBuilderError::BufferTooSmall)? as usize;
+        let type_entry_index = (type_id as usize)
+            .checked_mul(2)
+            .and_then(|offset| type_table_offset.checked_add(offset))
+            .ok_or(MachineBuilderError::BufferTooSmall)?;
+        set_value(
+            self.buffer,
+            type_entry_index,
+            function_count,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        set_value(
+            self.buffer,
+            type_entry_index
+                .checked_add(1)
+                .ok_or(MachineBuilderError::BufferTooSmall)?,
+            self.free,
+            MachineBuilderError::BufferTooSmall,
+        )?;
         let shared_globals_size = self.shared_globals_size;
         MachineBuilder::new(
             self,
             function_count,
             globals_size,
-            globals_offset,
+            globals_base,
             shared_globals_size,
+            type_id,
         )
+    }
+
+    pub fn add_instance(
+        &mut self,
+        type_id: ProgramWord,
+    ) -> Result<(), MachineBuilderError> {
+        if self.next_instance_number >= self.instance_count {
+            return Err(MachineBuilderError::MachineCountExceeded);
+        }
+        let type_descriptor = self
+            .descriptor
+            .types
+            .get(type_id as usize)
+            .ok_or(MachineBuilderError::MachineCountExceeded)?;
+        let instance_table_offset = read_static(INSTANCE_TABLE_OFFSET, self.buffer)
+            .map_err(|_| MachineBuilderError::BufferTooSmall)? as usize;
+        let instance_entry_index = (self.next_instance_number as usize)
+            .checked_mul(2)
+            .and_then(|offset| instance_table_offset.checked_add(offset))
+            .ok_or(MachineBuilderError::BufferTooSmall)?;
+        let globals_base = *self
+            .buffer
+            .get(GLOBALS_SIZE_OFFSET)
+            .ok_or(MachineBuilderError::BufferTooSmall)?;
+        set_value(
+            self.buffer,
+            instance_entry_index,
+            type_id,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        set_value(
+            self.buffer,
+            instance_entry_index
+                .checked_add(1)
+                .ok_or(MachineBuilderError::BufferTooSmall)?,
+            globals_base,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        let globals_slot = get_mut_or(
+            self.buffer,
+            GLOBALS_SIZE_OFFSET,
+            MachineBuilderError::BufferTooSmall,
+        )?;
+        let Some(new_globals_size) = globals_slot.checked_add(type_descriptor.globals_size) else {
+            return Err(MachineBuilderError::TooLarge(type_descriptor.globals_size as usize));
+        };
+        *globals_slot = new_globals_size;
+        let Some(next_instance_number) = self.next_instance_number.checked_add(1) else {
+            return Err(MachineBuilderError::MachineCountOverflowsWord(
+                self.next_instance_number as usize,
+            ));
+        };
+        self.next_instance_number = next_instance_number;
+        if self
+            .descriptor
+            .add_instance(MachineInstanceDescriptor {
+                type_id,
+                globals_base,
+            })
+            .is_err()
+        {
+            return Err(MachineBuilderError::MachineCountExceeded);
+        }
+        Ok(())
     }
 
     pub fn new_shared_function(
@@ -223,8 +379,24 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         Ok(())
     }
 
-    fn finish_machine(&mut self, globals_size: ProgramWord, machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>) -> Result<(), MachineBuilderError>{
-        if self.descriptor.add_machine(machine_descriptor).is_err() {
+    fn finish_machine(
+        &mut self,
+        globals_size: ProgramWord,
+        machine_descriptor: MachineTypeDescriptor<FUNCTION_COUNT_MAX>,
+        type_id: ProgramWord,
+        globals_base: ProgramWord,
+    ) -> Result<(), MachineBuilderError>{
+        if self.descriptor.add_type(machine_descriptor).is_err() {
+            return Err(MachineBuilderError::MachineCountExceeded);
+        }
+        if self
+            .descriptor
+            .add_instance(MachineInstanceDescriptor {
+                type_id,
+                globals_base,
+            })
+            .is_err()
+        {
             return Err(MachineBuilderError::MachineCountExceeded);
         }
         let globals_slot = get_mut_or(
@@ -236,12 +408,18 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             return Err(MachineBuilderError::TooLarge(globals_size as usize));
         };
         *globals_slot = new_globals_size;
-        let Some(next_machine_builder) = self.next_machine_builder.checked_add(1) else {
+        let Some(next_type_builder) = self.next_type_builder.checked_add(1) else {
             return Err(MachineBuilderError::MachineCountOverflowsWord(
-                self.next_machine_builder as usize,
+                self.next_type_builder as usize,
             ));
         };
-        self.next_machine_builder = next_machine_builder;
+        self.next_type_builder = next_type_builder;
+        let Some(next_instance_number) = self.next_instance_number.checked_add(1) else {
+            return Err(MachineBuilderError::MachineCountOverflowsWord(
+                self.next_instance_number as usize,
+            ));
+        };
+        self.next_instance_number = next_instance_number;
         Ok(())
     }
 
@@ -264,9 +442,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         function_start: ProgramWord,
         index: FunctionIndex,
     ) -> Result<(), MachineBuilderError> {
-        let table_base = MACHINE_TABLE_OFFSET
-            .checked_add(self.machine_count as usize)
-            .ok_or(MachineBuilderError::BufferTooSmall)?;
+        let table_base = read_static(SHARED_FUNCTION_TABLE_OFFSET, self.buffer)
+            .map_err(|_| MachineBuilderError::BufferTooSmall)? as usize;
         let entry_index = table_base
             .checked_add(usize::from(index.0))
             .ok_or(MachineBuilderError::BufferTooSmall)?;
@@ -308,13 +485,14 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
 /// [globals size][globals offset][function offsets...][static data + functions...]
 pub struct MachineBuilder<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     program: ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>,
-    machine_start: ProgramWord,
+    function_table_start: ProgramWord,
     function_count: ProgramWord,
     next_function_number: ProgramWord,
     globals_size: ProgramWord,
     globals_offset: ProgramWord,
     shared_globals_size: ProgramWord,
-    discriptor: MachineDescriptor<FUNCTION_COUNT_MAX>,
+    type_id: ProgramWord,
+    discriptor: MachineTypeDescriptor<FUNCTION_COUNT_MAX>,
 }
 
 impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
@@ -338,20 +516,20 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         globals_size: ProgramWord,
         globals_offset: ProgramWord,
         shared_globals_size: ProgramWord,
+        type_id: ProgramWord,
     ) -> Result<Self, MachineBuilderError> {
-        let machine_start = program.free;
-        program.add_word(globals_size)?;
-        program.add_word(globals_offset)?;
+        let function_table_start = program.free;
         program.allocate(function_count)?;
         Ok(Self {
             program,
-            machine_start,
+            function_table_start,
             function_count,
             next_function_number: 0,
             globals_size,
             globals_offset,
             shared_globals_size,
-            discriptor: MachineDescriptor::new(),
+            type_id,
+            discriptor: MachineTypeDescriptor::new(globals_size),
         })
     }
 
@@ -402,7 +580,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     }
 
     pub fn finish(mut self) -> Result<ProgramBuilder<'a, MACHINE_COUNT_MAX, FUNCTION_COUNT_MAX>, MachineBuilderError> {
-        self.program.finish_machine(self.globals_size, self.discriptor)?;
+        let globals_base = self.globals_offset;
+        let type_id = self.type_id;
+        self.program
+            .finish_machine(self.globals_size, self.discriptor, type_id, globals_base)?;
         Ok(self.program)
     }
 
@@ -436,11 +617,8 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         if self.discriptor.add_function(index.clone()).is_err() {
             return Err(MachineBuilderError::FunctionCoutExceeded);
         }
-        let base = usize::from(self.machine_start);
-        let Some(machine_offset) = base.checked_add(MACHINE_FUNCTIONS_OFFSET) else {
-            return Err(MachineBuilderError::BufferTooSmall); // BUG: wrong error
-        };
-        let Some(index) = machine_offset.checked_add(usize::from(index.0)) else {
+        let base = usize::from(self.function_table_start);
+        let Some(index) = base.checked_add(usize::from(index.0)) else {
             return Err(MachineBuilderError::BufferTooSmall); // BUG: worng error
         };
         set_value(

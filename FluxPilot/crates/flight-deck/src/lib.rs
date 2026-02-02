@@ -104,9 +104,15 @@ impl ProgramDescriptorJs {
         descriptor: ProgramDescriptor<MACHINE_COUNT, FUNCTION_COUNT>,
     ) -> Self {
         let machine_function_counts = descriptor
-            .machines
+            .instances
             .iter()
-            .map(|machine| machine.functions.len() as u32)
+            .map(|instance| {
+                descriptor
+                    .types
+                    .get(instance.type_id as usize)
+                    .map(|machine| machine.functions.len() as u32)
+                    .unwrap_or(0)
+            })
             .collect();
         Self {
             length: descriptor.length,
@@ -362,6 +368,7 @@ pub fn compile_program(source: &str, buffer: &mut [u16]) -> Result<ProgramDescri
     let builder = ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(
         buffer,
         machine_count,
+        machine_count,
         shared_function_count,
     )
         .map_err(|_| JsValue::from_str("program buffer too small for machine count"))?;
@@ -385,6 +392,7 @@ fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsV
     const FUNCTION_COUNT: usize = 2;
     let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
         buffer,
+        MACHINE_COUNT as u16,
         MACHINE_COUNT as u16,
         0,
     )

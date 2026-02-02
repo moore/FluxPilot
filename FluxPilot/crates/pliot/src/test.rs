@@ -149,6 +149,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
         MACHINE_COUNT as u16,
+        MACHINE_COUNT as u16,
         0,
     )
     .expect("could not get machine builder");
@@ -230,7 +231,8 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         args.push(StackWord::from(green)).unwrap();
         args.push(StackWord::from(blue)).unwrap();
 
-        let store_function_index = descriptor.machines[0].functions[2].clone();
+        let type_id = descriptor.instances[0].type_id as usize;
+        let store_function_index = descriptor.types[type_id].functions[2].clone();
         let function = FunctionId {
             machine_index: 0,
             function_index: store_function_index.into(),
@@ -269,7 +271,8 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let args = Vec::<StackWord, MAX_ARGS>::new();
 
         println!("stack is {:?}", stack);
-        let get_function_index = descriptor.machines[0].functions[1].clone();
+        let type_id = descriptor.instances[0].type_id as usize;
+        let get_function_index = descriptor.types[type_id].functions[1].clone();
         let function = FunctionId {
             machine_index: 0,
             function_index: get_function_index.into(),
@@ -322,6 +325,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     let mut buffer = [0u16; 512];
     let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
+        MACHINE_COUNT as ProgramWord,
         MACHINE_COUNT as ProgramWord,
         0,
     )
@@ -416,6 +420,7 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
     let mut buffer = [0u16; 256];
     let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
+        MACHINE_COUNT as ProgramWord,
         MACHINE_COUNT as ProgramWord,
         0,
     )

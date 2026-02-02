@@ -169,26 +169,31 @@ pub enum MachineError {
     InvalidProgramVersion(ProgramWord),
 }
 
-pub const PROGRAM_VERSION: ProgramWord = 1;
+pub const PROGRAM_VERSION: ProgramWord = 2;
 pub const VERSION_OFFSET: usize = 0;
 pub const MACHINE_COUNT_OFFSET: usize = VERSION_OFFSET + 1;
 pub const GLOBALS_SIZE_OFFSET: usize = MACHINE_COUNT_OFFSET + 1;
 pub const SHARED_FUNCTION_COUNT_OFFSET: usize = GLOBALS_SIZE_OFFSET + 1;
-pub const MACHINE_TABLE_OFFSET: usize = SHARED_FUNCTION_COUNT_OFFSET + 1;
-pub const MACHINE_FUNCTIONS_OFFSET: usize = 2;
+pub const TYPE_COUNT_OFFSET: usize = SHARED_FUNCTION_COUNT_OFFSET + 1;
+pub const INSTANCE_TABLE_OFFSET: usize = TYPE_COUNT_OFFSET + 1;
+pub const TYPE_TABLE_OFFSET: usize = INSTANCE_TABLE_OFFSET + 1;
+pub const SHARED_FUNCTION_TABLE_OFFSET: usize = TYPE_TABLE_OFFSET + 1;
+pub const HEADER_WORDS: usize = SHARED_FUNCTION_TABLE_OFFSET + 1;
 
 const INIT_OFFSET: usize = 0;
 const GET_COLOR_OFFSET: usize = INIT_OFFSET + 1;
 
 #[derive(Debug)]
-pub struct MachineDescriptor<const FUNCTION_COUNT_MAX: usize> {
+pub struct MachineTypeDescriptor<const FUNCTION_COUNT_MAX: usize> {
     pub functions: Vec<FunctionIndex, FUNCTION_COUNT_MAX>,
+    pub globals_size: ProgramWord,
 }
 
-impl<const FUNCTION_COUNT_MAX: usize> MachineDescriptor<FUNCTION_COUNT_MAX> {
-    pub fn new() -> Self {
+impl<const FUNCTION_COUNT_MAX: usize> MachineTypeDescriptor<FUNCTION_COUNT_MAX> {
+    pub fn new(globals_size: ProgramWord) -> Self {
         Self {
             functions: Vec::new(),
+            globals_size,
         }
     }
 
@@ -197,16 +202,23 @@ impl<const FUNCTION_COUNT_MAX: usize> MachineDescriptor<FUNCTION_COUNT_MAX> {
     }
 }
 
-impl<const FUNCTION_COUNT_MAX: usize> Default for MachineDescriptor<FUNCTION_COUNT_MAX> {
+impl<const FUNCTION_COUNT_MAX: usize> Default for MachineTypeDescriptor<FUNCTION_COUNT_MAX> {
     fn default() -> Self {
-        Self::new()
+        Self::new(0)
     }
+}
+
+#[derive(Debug)]
+pub struct MachineInstanceDescriptor {
+    pub type_id: ProgramWord,
+    pub globals_base: ProgramWord,
 }
 
 #[derive(Debug)]
 pub struct ProgramDescriptor<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> {
     pub length: usize,
-    pub machines: Vec<MachineDescriptor<FUNCTION_COUNT_MAX>, MACHINE_COUNT_MAX>,
+    pub types: Vec<MachineTypeDescriptor<FUNCTION_COUNT_MAX>, MACHINE_COUNT_MAX>,
+    pub instances: Vec<MachineInstanceDescriptor, MACHINE_COUNT_MAX>,
 }
 
 impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
@@ -215,15 +227,23 @@ impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
     pub fn new() -> Self {
         Self {
             length: 0,
-            machines: Vec::new(),
+            types: Vec::new(),
+            instances: Vec::new(),
         }
     }
 
-    pub fn add_machine(
+    pub fn add_type(
         &mut self,
-        machine_descriptor: MachineDescriptor<FUNCTION_COUNT_MAX>,
-    ) -> Result<(), MachineDescriptor<FUNCTION_COUNT_MAX>> {
-        self.machines.push(machine_descriptor)
+        machine_descriptor: MachineTypeDescriptor<FUNCTION_COUNT_MAX>,
+    ) -> Result<(), MachineTypeDescriptor<FUNCTION_COUNT_MAX>> {
+        self.types.push(machine_descriptor)
+    }
+
+    pub fn add_instance(
+        &mut self,
+        instance: MachineInstanceDescriptor,
+    ) -> Result<(), MachineInstanceDescriptor> {
+        self.instances.push(instance)
     }
 }
 
@@ -278,6 +298,14 @@ impl<'a, 'b> Program<'a, 'b> {
         Ok(*count)
     }
 
+    pub fn type_count(&self) -> Result<ProgramWord, MachineError> {
+        let Some(count) = self.static_data.get(TYPE_COUNT_OFFSET) else {
+            return Err(MachineError::OutOfBoudsStaticRead(TYPE_COUNT_OFFSET));
+        };
+
+        Ok(*count)
+    }
+
     pub fn shared_function_count(&self) -> Result<ProgramWord, MachineError> {
         let Some(count) = self
             .static_data
@@ -290,28 +318,87 @@ impl<'a, 'b> Program<'a, 'b> {
         Ok(*count)
     }
 
-    fn shared_function_table_offset(&self) -> Result<usize, MachineError> {
-        let machine_count = self.machine_count()? as usize;
-        MACHINE_TABLE_OFFSET
-            .checked_add(machine_count)
-            .ok_or(MachineError::OutOfBoudsStaticRead(MACHINE_TABLE_OFFSET))
+    fn instance_table_offset(&self) -> Result<usize, MachineError> {
+        let offset = read_static(INSTANCE_TABLE_OFFSET, self.static_data)?;
+        Ok(offset as usize)
     }
 
-    fn machine_globals_offset(
+    fn type_table_offset(&self) -> Result<usize, MachineError> {
+        let offset = read_static(TYPE_TABLE_OFFSET, self.static_data)?;
+        Ok(offset as usize)
+    }
+
+    fn shared_function_table_offset(&self) -> Result<usize, MachineError> {
+        let offset = read_static(SHARED_FUNCTION_TABLE_OFFSET, self.static_data)?;
+        Ok(offset as usize)
+    }
+
+    fn instance_globals_offset(
         &self,
         machine_number: ProgramWord,
     ) -> Result<ProgramWord, MachineError> {
-        if machine_number > self.machine_count()? {
+        let machine_count = self.machine_count()?;
+        if machine_number >= machine_count {
             return Err(MachineError::MachineIndexOutOfRange(machine_number));
         };
-        let Some(machine_slot) = (machine_number as usize).checked_add(MACHINE_TABLE_OFFSET) else {
-            return Err(MachineError::OutOfBoudsStaticRead(machine_number as usize));
-        };
-        let machine_index = read_static(machine_slot, self.static_data)?;
-        let globals_offset_index = machine_index
+        let table_offset = self.instance_table_offset()?;
+        let entry_index = (machine_number as usize)
+            .checked_mul(2)
+            .and_then(|offset| table_offset.checked_add(offset))
+            .ok_or(MachineError::OutOfBoudsStaticRead(table_offset))?;
+        let globals_base_index = entry_index
             .checked_add(1)
-            .ok_or(MachineError::OutOfBoudsStaticRead(machine_index as usize))?;
-        read_static(globals_offset_index as usize, self.static_data)
+            .ok_or(MachineError::OutOfBoudsStaticRead(entry_index))?;
+        read_static(globals_base_index, self.static_data)
+    }
+
+    fn get_type_for_instance(
+        &self,
+        machine_number: ProgramWord,
+    ) -> Result<ProgramWord, MachineError> {
+        let machine_count = self.machine_count()?;
+        if machine_number >= machine_count {
+            return Err(MachineError::MachineIndexOutOfRange(machine_number));
+        };
+        let table_offset = self.instance_table_offset()?;
+        let entry_index = (machine_number as usize)
+            .checked_mul(2)
+            .and_then(|offset| table_offset.checked_add(offset))
+            .ok_or(MachineError::OutOfBoudsStaticRead(table_offset))?;
+        read_static(entry_index, self.static_data)
+    }
+
+    fn get_type_function_entry(
+        &self,
+        type_id: ProgramWord,
+        function_number: usize,
+    ) -> Result<usize, MachineError> {
+        let type_count = self.type_count()?;
+        if type_id >= type_count {
+            return Err(MachineError::MachineIndexOutOfRange(type_id));
+        };
+        let type_table_offset = self.type_table_offset()?;
+        let type_entry_index = (type_id as usize)
+            .checked_mul(2)
+            .and_then(|offset| type_table_offset.checked_add(offset))
+            .ok_or(MachineError::OutOfBoudsStaticRead(type_table_offset))?;
+        let function_count = read_static(type_entry_index, self.static_data)? as usize;
+        if function_number >= function_count {
+            return Err(MachineError::SharedFunctionIndexOutOfRange(
+                function_number as ProgramWord,
+            ));
+        }
+        let function_table_offset = read_static(
+            type_entry_index
+                .checked_add(1)
+                .ok_or(MachineError::OutOfBoudsStaticRead(type_entry_index))?,
+            self.static_data,
+        )? as usize;
+        let entry_index = function_table_offset
+            .checked_add(function_number)
+            .ok_or(MachineError::OutOfBoudsStaticRead(function_table_offset))?;
+        let entry_point = read_static(entry_index, self.static_data)?;
+        Ok(entry_point as usize)
     }
 
     fn get_function_entry(
@@ -319,22 +406,8 @@ impl<'a, 'b> Program<'a, 'b> {
         machine_number: ProgramWord,
         function_number: usize,
     ) -> Result<usize, MachineError> {
-        if machine_number > self.machine_count()? {
-            return Err(MachineError::MachineIndexOutOfRange(machine_number));
-        };
-        // BOOG check for function out of range.
-        let Some(machine_slot) = (machine_number as usize).checked_add(MACHINE_TABLE_OFFSET) else {
-            return Err(MachineError::OutOfBoudsStaticRead(machine_number as usize));
-        };
-        let machine_index = read_static(machine_slot, self.static_data)?;
-        let Some(index_function_index) = (machine_index as usize)
-            .checked_add(MACHINE_FUNCTIONS_OFFSET)
-            .and_then(|base| base.checked_add(function_number))
-        else {
-            return Err(MachineError::OutOfBoudsStaticRead(machine_index as usize));
-        };
-        let entry_point = read_static(index_function_index, self.static_data)?;
-        Ok(entry_point as usize)
+        let type_id = self.get_type_for_instance(machine_number)?;
+        self.get_type_function_entry(type_id, function_number)
     }
 
     fn get_shared_function_entry(
@@ -425,7 +498,7 @@ impl<'a, 'b> Program<'a, 'b> {
         stack: &mut Vec<StackWord, STACK_SIZE>,
     ) -> Result<(), MachineError> {
         let mut pc = entry_point;
-        let locals_base = self.machine_globals_offset(machine_number)?;
+        let locals_base = self.instance_globals_offset(machine_number)?;
         self.locals_base = locals_base;
 
         loop {

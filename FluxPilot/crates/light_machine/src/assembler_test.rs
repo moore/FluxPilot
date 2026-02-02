@@ -4,7 +4,7 @@ use crate::builder::ProgramBuilder;
 #[test]
 fn assembles_basic_program() {
     let mut buffer = [0u16; 128];
-    let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1, 0).unwrap();
+    let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1, 1, 0).unwrap();
     let mut asm: Assembler<1, 2, 16, 16> = Assembler::new(builder);
 
     asm.add_line(".machine main locals 3 functions 2").unwrap();
@@ -23,14 +23,14 @@ fn assembles_basic_program() {
     asm.add_line(".end").unwrap();
 
     let descriptor = asm.finish().unwrap();
-    assert_eq!(descriptor.machines.len(), 1);
+    assert_eq!(descriptor.instances.len(), 1);
     assert!(descriptor.length > 0);
 }
 
 #[test]
 fn supports_forward_function_declaration() {
     let mut buffer = [0u16; 128];
-    let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1, 0).unwrap();
+    let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1, 1, 0).unwrap();
     let mut asm: Assembler<1, 2, 16, 16> = Assembler::new(builder);
 
     asm.add_line(".machine main locals 1 functions 2").unwrap();
@@ -44,13 +44,13 @@ fn supports_forward_function_declaration() {
     asm.add_line(".end").unwrap();
 
     let descriptor = asm.finish().unwrap();
-    assert_eq!(descriptor.machines.len(), 1);
+    assert_eq!(descriptor.instances.len(), 1);
 }
 
 #[test]
 fn reports_line_numbers_on_error() {
     let mut buffer = [0u16; 64];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 0).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 0).unwrap();
     let mut asm: Assembler<1, 1, 8, 8> = Assembler::new(builder);
 
     asm.add_line(".machine main locals 1 functions 1").unwrap();
@@ -68,7 +68,7 @@ fn reports_line_numbers_on_error() {
 #[test]
 fn supports_named_globals() {
     let mut buffer = [0u16; 128];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 0).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 0).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
 
     asm.add_line(".machine main locals 2 functions 1").unwrap();
@@ -84,13 +84,13 @@ fn supports_named_globals() {
     asm.add_line(".end").unwrap();
 
     let descriptor = asm.finish().unwrap();
-    assert_eq!(descriptor.machines.len(), 1);
+    assert_eq!(descriptor.instances.len(), 1);
 }
 
 #[test]
 fn supports_shared_functions_and_data() {
     let mut buffer = [0u16; 128];
-    let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1, 1).unwrap();
+    let builder = ProgramBuilder::<1, 2>::new(&mut buffer, 1, 1, 1).unwrap();
     let mut asm: Assembler<1, 2, 16, 16> = Assembler::new(builder);
     asm.add_line(".shared shared0 0").unwrap();
     asm.add_line(".shared_data shared_data").unwrap();
@@ -111,13 +111,13 @@ fn supports_shared_functions_and_data() {
     asm.add_line(".end").unwrap();
     asm.add_line(".end").unwrap();
     let descriptor = asm.finish().unwrap();
-    assert_eq!(descriptor.machines.len(), 1);
+    assert_eq!(descriptor.instances.len(), 1);
 }
 
 #[test]
 fn shared_function_requires_declaration() {
     let mut buffer = [0u16; 64];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 1).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
     asm.add_line(".shared_func_decl helper index 0").unwrap();
     let err = asm.finish().unwrap_err();
@@ -130,7 +130,7 @@ fn shared_function_requires_declaration() {
 #[test]
 fn shared_function_rejects_out_of_range_shared_global() {
     let mut buffer = [0u16; 64];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 1).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
     asm.add_line(".shared shared0 0").unwrap();
     asm.add_line(".shared_func helper index 0").unwrap();
@@ -147,7 +147,7 @@ fn shared_function_rejects_out_of_range_shared_global() {
 #[test]
 fn shared_data_rejects_duplicate_label() {
     let mut buffer = [0u16; 64];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 1).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
     asm.add_line(".shared_data shared_data").unwrap();
     asm.add_line("dup:").unwrap();
@@ -164,7 +164,7 @@ fn shared_data_rejects_duplicate_label() {
 #[test]
 fn shared_function_cannot_be_started_inside_machine() {
     let mut buffer = [0u16; 64];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 1).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
     asm.add_line(".machine main locals 0 functions 1").unwrap();
     let err = asm.add_line(".shared_func helper index 0").unwrap_err();
@@ -180,7 +180,7 @@ fn shared_function_cannot_be_started_inside_machine() {
 #[test]
 fn shared_func_decl_duplicate_index_is_error() {
     let mut buffer = [0u16; 64];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 2).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 2).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
     asm.add_line(".shared_func_decl a index 0").unwrap();
     let err = asm.add_line(".shared_func_decl b index 0").unwrap_err();
@@ -196,7 +196,7 @@ fn shared_func_decl_duplicate_index_is_error() {
 #[test]
 fn shared_function_label_not_visible_in_machine() {
     let mut buffer = [0u16; 128];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 1).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
     asm.add_line(".shared_func helper index 0").unwrap();
     asm.add_line("shared_label:").unwrap();
@@ -218,7 +218,7 @@ fn shared_function_label_not_visible_in_machine() {
 #[test]
 fn supports_shared_globals() {
     let mut buffer = [0u16; 128];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 0).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 0).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
 
     asm.add_line(".shared brightness 0").unwrap();
@@ -230,13 +230,13 @@ fn supports_shared_globals() {
     asm.add_line(".end").unwrap();
 
     let descriptor = asm.finish().unwrap();
-    assert_eq!(descriptor.machines.len(), 1);
+    assert_eq!(descriptor.instances.len(), 1);
 }
 
 #[test]
 fn supports_named_stack_slots() {
     let mut buffer = [0u16; 128];
-    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 0).unwrap();
+    let builder = ProgramBuilder::<1, 1>::new(&mut buffer, 1, 1, 0).unwrap();
     let mut asm: Assembler<1, 1, 16, 16> = Assembler::new(builder);
 
     asm.add_line(".machine main locals 0 functions 1").unwrap();
@@ -250,5 +250,5 @@ fn supports_named_stack_slots() {
     asm.add_line(".end").unwrap();
 
     let descriptor = asm.finish().unwrap();
-    assert_eq!(descriptor.machines.len(), 1);
+    assert_eq!(descriptor.instances.len(), 1);
 }

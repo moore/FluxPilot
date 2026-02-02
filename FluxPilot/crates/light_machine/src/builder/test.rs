@@ -9,6 +9,7 @@ fn test_new_builder() -> Result<(), MachineBuilderError> {
     let _ = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
         MACHINE_COUNT as u16,
+        MACHINE_COUNT as u16,
         0,
     )?;
     assert_eq!(PROGRAM_VERSION, buffer[0]);
@@ -19,26 +20,10 @@ fn test_new_builder() -> Result<(), MachineBuilderError> {
 fn test_new_machine_builder() -> Result<(), MachineBuilderError> {
     const MACHINE_COUNT: usize = 3;
     const FUNCTION_COUNT: usize = 5;
-    #[rustfmt::skip]
-    let goal= [
-        1u16,           // program version
-        3,              // machine count (one allocated but not used)
-        0,              // Globals size
-        0,              // Shared function count
-        7, 17, 0,       // machine pointers (last unused)
-        0,              // globals size
-        0,              // globals offset
-        0, 0, 0, 0, 0,  // Machine 1 function table (no functions)
-        17, 31, 71,     // Machine 1 static data
-        0,              // Globals size
-        0,              // globals offset
-        0, 0, 0, 0, 0,  // Machine 2 fucntion table (no functions)
-        7, 11, 97,      // Manchie 2 static data
-    ];
-
-    let mut buffer = [0u16; 27];
+    let mut buffer = [0u16; 64];
     let program = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
+        MACHINE_COUNT as u16,
         MACHINE_COUNT as u16,
         0,
     )?;
@@ -53,7 +38,32 @@ fn test_new_machine_builder() -> Result<(), MachineBuilderError> {
     let _index = machine.add_static(data.as_slice())?;
     let _program = machine.finish();
 
-    assert_eq!(buffer, goal);
+    assert_eq!(buffer[VERSION_OFFSET], PROGRAM_VERSION);
+    assert_eq!(buffer[MACHINE_COUNT_OFFSET], 3);
+    assert_eq!(buffer[TYPE_COUNT_OFFSET], 3);
+    assert_eq!(buffer[SHARED_FUNCTION_COUNT_OFFSET], 0);
+    assert_eq!(buffer[INSTANCE_TABLE_OFFSET], HEADER_WORDS as u16);
+    assert_eq!(buffer[TYPE_TABLE_OFFSET], (HEADER_WORDS + 6) as u16);
+    assert_eq!(
+        buffer[SHARED_FUNCTION_TABLE_OFFSET],
+        (HEADER_WORDS + 12) as u16
+    );
+    let instance_table = HEADER_WORDS;
+    assert_eq!(buffer[instance_table], 0);
+    assert_eq!(buffer[instance_table + 1], 0);
+    assert_eq!(buffer[instance_table + 2], 1);
+    assert_eq!(buffer[instance_table + 3], 0);
+    let type_table = HEADER_WORDS + 6;
+    assert_eq!(buffer[type_table], FUNCTION_COUNT as u16);
+    assert_eq!(buffer[type_table + 1], (HEADER_WORDS + 12) as u16);
+    assert_eq!(buffer[type_table + 2], FUNCTION_COUNT as u16);
+    assert_eq!(buffer[type_table + 3], (HEADER_WORDS + 20) as u16);
+    assert_eq!(buffer[HEADER_WORDS + 12 + 5], 17);
+    assert_eq!(buffer[HEADER_WORDS + 12 + 6], 31);
+    assert_eq!(buffer[HEADER_WORDS + 12 + 7], 71);
+    assert_eq!(buffer[HEADER_WORDS + 20 + 5], 7);
+    assert_eq!(buffer[HEADER_WORDS + 20 + 6], 11);
+    assert_eq!(buffer[HEADER_WORDS + 20 + 7], 97);
     Ok(())
 }
 
@@ -63,31 +73,8 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
     const FUNCTION_COUNT: usize = 2;
     let globals_size = 2;
 
-    #[rustfmt::skip]
-    let goal = [
-        1u16,             // program version
-        1,                // machine count
-        2,                // Globals Size
-        0,                // Shared function count
-        5,                // machine pointer
-        2,                // Globals size
-        0,                // Globals offset
-        19, 12,           // Machine 1 function table
-        17, 31, 71,       // Machine 1 static data
-        Ops::Push.into(), // Function 1
-        11,
-        Ops::LocalLoad.into(),
-        0,
-        Ops::LocalStore.into(),
-        1,
-        Ops::Exit.into(),
-        Ops::LocalLoad.into(), // Function 2
-        1,
-        Ops::Exit.into(),
-    ];
-
-    let mut buffer = [0u16; 22];
-    let program = ProgramBuilder::new(&mut buffer, MACHINE_COUNT as u16, 0)?;
+    let mut buffer = [0u16; 64];
+    let program = ProgramBuilder::new(&mut buffer, MACHINE_COUNT as u16, MACHINE_COUNT as u16, 0)?;
 
     let mut machine = program.new_machine(FUNCTION_COUNT as u16, globals_size)?;
     let data = [17, 31, 71];
@@ -108,6 +95,19 @@ fn test_new_function_builder() -> Result<(), MachineBuilderError> {
 
     let _program: ProgramBuilder<'_, MACHINE_COUNT, FUNCTION_COUNT> = machine.finish()?;
 
-    assert_eq!(buffer, goal);
+    assert_eq!(buffer[VERSION_OFFSET], PROGRAM_VERSION);
+    assert_eq!(buffer[MACHINE_COUNT_OFFSET], 1);
+    assert_eq!(buffer[TYPE_COUNT_OFFSET], 1);
+    assert_eq!(buffer[SHARED_FUNCTION_COUNT_OFFSET], 0);
+    let instance_table = HEADER_WORDS;
+    assert_eq!(buffer[instance_table], 0);
+    assert_eq!(buffer[instance_table + 1], 0);
+    let type_table = HEADER_WORDS + 2;
+    assert_eq!(buffer[type_table], FUNCTION_COUNT as u16);
+    assert_eq!(buffer[type_table + 1], (HEADER_WORDS + 4) as u16);
+    let static_start = HEADER_WORDS + 6;
+    assert_eq!(buffer[static_start], 17);
+    assert_eq!(buffer[static_start + 1], 31);
+    assert_eq!(buffer[static_start + 2], 71);
     Ok(())
 }

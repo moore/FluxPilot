@@ -16,8 +16,13 @@ const ASM_DATA_CAP: usize = 64;
 
 fn assemble_program(lines: &[&str]) -> StdVec<ProgramWord> {
     let mut buffer = [0u16; 256];
-    let builder =
-        ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(&mut buffer, 1, 0).unwrap();
+    let builder = ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(
+        &mut buffer,
+        1,
+        1,
+        0,
+    )
+    .unwrap();
     let mut asm: Assembler<ASM_MACHINE_MAX, ASM_FUNCTION_MAX, ASM_LABEL_CAP, ASM_DATA_CAP> =
         Assembler::new(builder);
     for line in lines {
@@ -35,6 +40,7 @@ fn assemble_program_with_shared(
     let mut buffer = [0u16; 256];
     let builder = ProgramBuilder::<ASM_MACHINE_MAX, ASM_FUNCTION_MAX>::new(
         &mut buffer,
+        machine_count,
         machine_count,
         shared_function_count,
     )
@@ -283,7 +289,7 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
 #[test]
 fn test_locals_are_machine_scoped() -> Result<(), MachineError> {
     let mut buffer = [0u16; 256];
-    let builder = ProgramBuilder::<2, 1>::new(&mut buffer, 2, 0).unwrap();
+    let builder = ProgramBuilder::<2, 1>::new(&mut buffer, 2, 2, 0).unwrap();
     let mut asm: Assembler<2, 1, 16, 16> = Assembler::new(builder);
 
     asm.add_line(".machine first locals 1 functions 1").unwrap();
@@ -331,6 +337,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     let mut buffer = [0u16; 512];
     let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
+        MACHINE_COUNT as ProgramWord,
         MACHINE_COUNT as ProgramWord,
         0,
     )
