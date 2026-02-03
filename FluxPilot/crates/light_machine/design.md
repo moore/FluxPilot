@@ -39,6 +39,15 @@ Shared function table entries point to program-scoped shared function entry poin
 See `FluxPilot/crates/light_machine/shared_functions_plan.md` for the detailed
 shared function semantics.
 
+## Program graph emission
+
+Compilers may build a program graph of globals, static data, functions, machine
+types, and machine instances before emitting a program. The graph is used to
+deduplicate identical definitions (statics, functions, and types) while keeping
+instance ordering stable. Emission still produces the same runtime tables
+(instances, types, shared functions); the graph only affects how entries are
+shared and the final program layout.
+
 ## Instance + type tables
 
 Instance table layout (at `INSTANCE_TABLE_OFFSET`):

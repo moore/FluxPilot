@@ -13,6 +13,12 @@ pub enum MachineBuilderError {
 /// Index for static data.
 pub struct DataIndex(ProgramWord);
 
+impl DataIndex {
+    pub fn to_word(&self) -> ProgramWord {
+        self.0
+    }
+}
+
 /// Index for function.
 #[derive(Clone, Debug)]
 pub struct FunctionIndex(ProgramWord);
@@ -818,6 +824,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
         Ok(())
     }
 
+    pub fn add_raw_word(&mut self, word: ProgramWord) -> Result<(), MachineBuilderError> {
+        self.machine.add_word(word)
+    }
+
     pub fn finish(
         mut self,
     ) -> Result<
@@ -994,6 +1004,10 @@ impl<'a, const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize>
             }
         }
         Ok(())
+    }
+
+    pub fn add_raw_word(&mut self, word: ProgramWord) -> Result<(), MachineBuilderError> {
+        self.program.add_word(word)
     }
 
     pub fn finish(
