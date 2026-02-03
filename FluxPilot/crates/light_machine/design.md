@@ -41,12 +41,21 @@ shared function semantics.
 
 ## Program graph emission
 
-Compilers may build a program graph of globals, static data, functions, machine
-types, and machine instances before emitting a program. The graph is used to
+Compilers may build a program graph of static data, functions, machine types,
+and machine instances before emitting a program. The graph is used to
 deduplicate identical definitions (statics, functions, and types) while keeping
 instance ordering stable. Emission still produces the same runtime tables
 (instances, types, shared functions); the graph only affects how entries are
 shared and the final program layout.
+
+Implementation notes (current):
+
+- The graph is built in `flight-deck` and emitted into the existing
+  `ProgramBuilder`.
+- Function bodies are stored as word references (literals, static refs, and
+  label offsets). Label offsets are resolved to absolute addresses at emit time.
+- Both per-machine static data and shared static data are emitted into the
+  shared static region so all static addresses are global within `static_data`.
 
 ## Instance + type tables
 
