@@ -24,33 +24,43 @@ The program header (versioned):
 
 ```
 [0] VERSION
-[1] MACHINE_COUNT
-[2] GLOBALS_SIZE (total globals required for all machines, including shared globals)
+[1] MACHINE_COUNT (instance count)
+[2] GLOBALS_SIZE (total globals required for all instances, including shared globals)
 [3] SHARED_FUNCTION_COUNT
-[4..] MACHINE_TABLE (machine_count entries)
-[... ] SHARED_FUNCTION_TABLE (shared_function_count entries)
+[4] TYPE_COUNT
+[5] INSTANCE_TABLE_OFFSET
+[6] TYPE_TABLE_OFFSET
+[7] SHARED_FUNCTION_TABLE_OFFSET
 ```
 
-Each entry in the machine table points to the start of a machine block.
+The instance table entries point to a machine type and a globals base.
+The type table entries point to a function table for that type.
 Shared function table entries point to program-scoped shared function entry points.
 See `FluxPilot/crates/light_machine/shared_functions_plan.md` for the detailed
 shared function semantics.
 
-## Machine block layout
+## Instance + type tables
 
-Each machine block is laid out as:
+Instance table layout (at `INSTANCE_TABLE_OFFSET`):
 
 ```
-machine_start:
-  [0] GLOBALS_SIZE     ; globals required by this machine
-  [1] GLOBALS_OFFSET   ; offset into the globals buffer
-  [2..] FUNCTION_TABLE (function_count entries)
-  [...] STATIC_DATA (machine-specific data section)
-  [...] FUNCTION_BODIES
+For each instance `i`:
+  [0] TYPE_ID          ; index into the type table
+  [1] GLOBALS_BASE     ; offset into the globals buffer
 ```
 
-Function table entries hold word offsets into `static_data`. The function
-count is not stored in the program image; it is known to the builder/host.
+Type table layout (at `TYPE_TABLE_OFFSET`):
+
+For each type `t`:
+  [0] FUNCTION_COUNT
+  [1] FUNCTION_TABLE_OFFSET
+
+Function index convention: `0 = init`, `1 = get_color`, remaining are user-defined.
+
+Function tables (pointed to by `FUNCTION_TABLE_OFFSET`) are sequences of entry
+points into `static_data`:
+
+  [entry_point_0, entry_point_1, ... entry_point_n]
 
 ## Stack model
 
