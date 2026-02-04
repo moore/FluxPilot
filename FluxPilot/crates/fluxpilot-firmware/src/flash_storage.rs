@@ -726,14 +726,14 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
     fn get_program<'a, 'b>(
         &'a mut self,
         program_number: ProgramNumber,
-        globals: &'b mut [ProgramWord],
+        memory: &'b mut [ProgramWord],
     ) -> Result<Program<'a, 'b>, StorageError> {
         if program_number.value() != 0 {
             return Err(StorageError::new(StorageErrorKind::UnknownProgram));
         }
 
         let program = self.program_slice();
-        Program::new(program, globals).map_err(StorageError::invalid_program)
+        Program::new(program, memory).map_err(StorageError::invalid_program)
     }
 
     fn get_ui_state_len(&mut self, program_number: ProgramNumber) -> Result<u32, StorageError> {

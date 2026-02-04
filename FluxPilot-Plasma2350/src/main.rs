@@ -25,7 +25,6 @@ use static_cell::StaticCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 use smart_leds::RGB8;
 
-use light_machine::StackWord;
 use fluxpilot_firmware::program::default_program;
 use fluxpilot_firmware::usb_io::{io_loop, PliotShared};
 use fluxpilot_firmware::usb_vendor::{VendorClass, VendorReceiver, VendorSender};
@@ -64,11 +63,10 @@ const NUM_LEDS: usize = 1024;
 const FRAME_TARGET_MS: u64 = 16;
 const PROGRAM_BUFFER_SIZE: usize = 1024;
 const USB_RECEIVE_BUF_SIZE: usize = 2048;
-const STACK_SIZE: usize = 100;
 const WATCHDOG_RESET_THRESHOLD: u32 = 3;
 const WATCHDOG_PERIOD_MS: u64 = 2_000;
 const WATCHDOG_FEED_MS: u64 = 500;
-const GLOBALS_SIZE: usize = 2048;
+const RUNTIME_MEMORY_WORDS: usize = 4096; // 8 KiB total runtime memory (u16 words).
 const WATCHDOG_SCRATCH_MAGIC: u32 = u32::from_le_bytes(*b"WDT0");
 
 type FlashDriver = flash::Flash<'static, peripherals::FLASH, flash::Blocking, FLASH_SIZE>;
@@ -81,11 +79,10 @@ type SharedState = PliotShared<
     MAX_RESULT,
     PROGRAM_BLOCK_SIZE,
     UI_BLOCK_SIZE,
-    STACK_SIZE,
 >;
 
 static PROGRAM_BUFFER: StaticCell<[u16; PROGRAM_BUFFER_SIZE]> = StaticCell::new();
-static GLOBALS: StaticCell<[u16; GLOBALS_SIZE]> = StaticCell::new();
+static RUNTIME_MEMORY: StaticCell<[u16; RUNTIME_MEMORY_WORDS]> = StaticCell::new();
 static FLASH_STORAGE: StaticCell<FlashStorage<FlashDriver>> = StaticCell::new();
 static USB_RECEIVE_BUF: StaticCell<[u8; USB_RECEIVE_BUF_SIZE]> = StaticCell::new();
 static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell::new();
@@ -167,7 +164,7 @@ async fn main(spawner: Spawner) -> ! {
     let class = VendorClass::new(&mut builder, 64);
     let usb = builder.build();
 
-    let globals = GLOBALS.init([0u16; GLOBALS_SIZE]);
+    let memory = RUNTIME_MEMORY.init([0u16; RUNTIME_MEMORY_WORDS]);
     let program_buffer = PROGRAM_BUFFER.init([0u16; PROGRAM_BUFFER_SIZE]);
     let storage = {
         use pliot::StorageError;
@@ -181,10 +178,8 @@ async fn main(spawner: Spawner) -> ! {
             }
         };
         //storage.format(); // Uncomment if needed to clear stored program
-        if clear_program {
-            if storage.format().is_err() {
-                panic!("flash storage watchdog reset format failed");
-            }
+        if clear_program && storage.format().is_err() {
+            panic!("flash storage watchdog reset format failed");
         }
         match storage.load_header() {
             Ok(()) => {}
@@ -211,13 +206,12 @@ async fn main(spawner: Spawner) -> ! {
     };
 
     let shared = PLIOT_SHARED.init(Mutex::new(PliotShared {
-        pliot: Pliot::new(storage, globals.as_mut_slice()),
-        stack: Vec::new(),
+        pliot: Pliot::new(storage, memory.as_mut_slice()),
     }));
     {
         let mut guard = shared.lock().await;
-        let PliotShared { pliot, stack } = &mut *guard;
-        if pliot.init(stack).is_err() {
+        let PliotShared { pliot } = &mut *guard;
+        if pliot.init().is_err() {
             panic!("pliot init failed");
         }
     }
@@ -238,7 +232,6 @@ async fn main(spawner: Spawner) -> ! {
         MAX_RESULT,
         PROGRAM_BLOCK_SIZE,
         UI_BLOCK_SIZE,
-        STACK_SIZE,
         FRAME_TARGET_MS,
     >(&mut led_driver, data, shared)
     .await;
@@ -298,7 +291,6 @@ async fn io_task(
             MAX_RESULT,
             PROGRAM_BLOCK_SIZE,
             UI_BLOCK_SIZE,
-            STACK_SIZE,
             USB_RECEIVE_BUF_SIZE,
             INCOMING_MESSAGE_CAP,
             OUTGOING_MESSAGE_CAP,
@@ -335,14 +327,13 @@ async fn led_loop_pio<
     const MAX_RESULT: usize,
     const PROGRAM_BLOCK_SIZE: usize,
     const UI_BLOCK_SIZE: usize,
-    const STACK_SIZE: usize,
     const FRAME_TARGET_MS: u64,
 >(
     writer: &mut PioWs2812<'static, P, SM, NUM_LEDS, Grb>,
     data: &mut [RGB8; NUM_LEDS],
     shared: &'static Mutex<
         CriticalSectionRawMutex,
-        PliotShared<'static, 'static, S, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, STACK_SIZE>,
+        PliotShared<'static, 'static, S, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>,
     >,
 ) -> ! where
     P: embassy_rp::pio::Instance,
@@ -353,48 +344,25 @@ async fn led_loop_pio<
         let tick = Instant::now().as_millis() as u32;
         {
             let mut guard = shared.lock().await;
-            let PliotShared { pliot, stack } = &mut *guard;
+            let PliotShared { pliot } = &mut *guard;
             let machine_count = match pliot.machine_count() {
                 Ok(count) => count,
                 Err(_) => {
                     continue;
                 }
             };
-            let seed_stack =
-                |stack: &mut Vec<StackWord, STACK_SIZE>, red: u8, green: u8, blue: u8| -> bool {
-                    stack.clear();
-                    if stack.push(red as StackWord).is_err() {
-                        return false;
-                    }
-                    if stack.push(green as StackWord).is_err() {
-                        stack.clear();
-                        return false;
-                    }
-                    if stack.push(blue as StackWord).is_err() {
-                        stack.clear();
-                        return false;
-                    }
-                    true
-                };
             for (i, led) in data.iter_mut().enumerate() {
                 let mut red = 0u8;
                 let mut green = 0u8;
                 let mut blue = 0u8;
-                if !seed_stack(stack, red, green, blue) {
-                    continue;
-                }
                 for machine_number in 0..machine_count {
-                    match pliot.get_led_color(machine_number, i as u16, tick, stack) {
+                    match pliot.get_led_color(machine_number, i as u16, tick, (red, green, blue)) {
                         Ok((next_red, next_green, next_blue)) => {
                             red = next_red;
                             green = next_green;
                             blue = next_blue;
-                            if !seed_stack(stack, red, green, blue) {
-                                break;
-                            }
                         }
                         Err(_) => {
-                            stack.clear();
                             break;
                         }
                     }

@@ -80,13 +80,13 @@ impl<'a> Storage for MemStorage<'a> {
     fn get_program<'b, 'c>(
         &'b mut self,
         program_number: ProgramNumber,
-        globals: &'c mut [ProgramWord],
+        memory: &'c mut [ProgramWord],
     ) -> Result<Program<'b, 'c>, StorageError> {
         if program_number.0 != 0 {
             return Err(StorageError::new(StorageErrorKind::UnknownProgram));
         }
 
-        match Program::new(self.programs[self.active_index], globals) {
+        match Program::new(self.programs[self.active_index], memory) {
             Ok(v) => Ok(v),
             Err(e) => Err(StorageError::invalid_program(e)),
         }

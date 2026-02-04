@@ -161,7 +161,7 @@ pub trait Storage {
     fn get_program<'a, 'b>(
         &'a mut self,
         program_number: ProgramNumber,
-        globals: &'b mut [ProgramWord],
+        memory: &'b mut [ProgramWord],
     ) -> Result<Program<'a, 'b>, StorageError>;
     fn get_ui_state_len(&mut self, program_number: ProgramNumber) -> Result<u32, StorageError>;
     fn read_ui_state_block(
@@ -218,16 +218,13 @@ impl<
         }
     }
 
-    pub fn init<const STACK_SIZE: usize>(
-        &mut self,
-        stack: &mut Vec<StackWord, STACK_SIZE>,
-    ) -> Result<(), PliotError> {
+    pub fn init(&mut self) -> Result<(), PliotError> {
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
         let machine_count = program.machine_count()?;
         for machine_index in 0..machine_count {
-            stack.clear();
-            program.init_machine(machine_index, stack)?;
+            program.stack_mut().clear();
+            program.init_machine(machine_index)?;
         }
         Ok(())
     }
@@ -239,9 +236,8 @@ impl<
     }
 
 
-    pub fn process_message<const STACK_SIZE: usize>(
+    pub fn process_message(
         &mut self,
-        stack: &mut Vec<StackWord, STACK_SIZE>,
         in_buff: &mut [u8],
         out_buff: &mut [u8],
     ) -> Result<usize, PliotError> {
@@ -254,7 +250,7 @@ impl<
                 function,
                 args,
             } => {
-                let results = self.call(stack, function, &args)?;
+                let results = self.call(function, &args)?;
                 
                 let result =
                     Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>::Return {
@@ -457,14 +453,14 @@ impl<
                         // BOOG: should return unexpted request it
                         Self::write_unexpected_message_type(Some(request_id), MessageType::FinishProgram, out_buff)?
                     }
-                    Some(current) => {
+                            Some(current) => {
                         if current.request_id != request_id {
                             // BOOG: should return unexpted request it
                             self.loader = Some(current);
                             Self::write_unexpected_message_type(Some(request_id), MessageType::FinishProgram, out_buff)?
                         } else {
                             self.storage.finish_load(current.loader)?;
-                            self.init(stack)?;
+                            self.init()?;
                             0
                         }
                     }
@@ -476,47 +472,55 @@ impl<
     }
 
 
-    pub fn call<const STACK_SIZE: usize>(
+    pub fn call(
         &mut self,
-        stack: &mut Vec<StackWord, STACK_SIZE>,
         function: FunctionId,
         args: &Vec<StackWord, MAX_ARGS>,
     ) -> Result<Vec<StackWord, MAX_RESULT>, PliotError> {
         let Ok(function_index) = function.function_index.try_into() else {
             return Err(PliotError::FunctionIndexOutOfRange);
         };
-        stack.clear();
-
-        for arg in args {
-            if stack.push(*arg).is_err() {
-                Err(MachineError::StackOverflow)?;
-            }
-        }
-        
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
 
-        program.call(function.machine_index, function_index, stack)?;
+        {
+            let stack = program.stack_mut();
+            stack.clear();
+            for arg in args {
+                stack.push(*arg)?;
+            }
+        }
+        program.call(function.machine_index, function_index)?;
 
-        if stack.len() > MAX_RESULT {
+        if program.stack().len() > MAX_RESULT {
             return Err(PliotError::ResultTooLarge);
         }
 
-        let results: Vec<StackWord, MAX_RESULT> = stack.into_iter().map(|i| *i).collect();
+        let mut results: Vec<StackWord, MAX_RESULT> = Vec::new();
+        results
+            .extend_from_slice(program.stack().as_slice())
+            .map_err(|_| PliotError::ResultTooLarge)?;
 
        Ok(results)
     }
 
-   pub fn get_led_color<const STACK_SIZE: usize>(
+   pub fn get_led_color(
         &mut self,
         machine_number: ProgramWord,
         index: u16,
         tick: u32,
-        stack: &mut Vec<StackWord, STACK_SIZE>,
+        seed: (u8, u8, u8),
     ) -> Result<(u8, u8, u8), PliotError> {
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
-        let result = program.get_led_color(machine_number, index, tick, stack)?;
+        {
+            let stack = program.stack_mut();
+            stack.clear();
+            stack.push(seed.0 as StackWord)?;
+            stack.push(seed.1 as StackWord)?;
+            stack.push(seed.2 as StackWord)?;
+        }
+        let result = program.get_led_color(machine_number, index, tick)?;
         Ok(result)
     }
 

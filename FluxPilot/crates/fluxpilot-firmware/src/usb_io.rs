@@ -2,7 +2,6 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_usb::driver::{Driver, EndpointError};
 use heapless::Vec;
-use light_machine::StackWord;
 use pliot::Pliot;
 
 use crate::usb_vendor::{VendorReceiver, VendorSender};
@@ -15,10 +14,8 @@ pub struct PliotShared<
     const MAX_RESULT: usize,
     const PROGRAM_BLOCK_SIZE: usize,
     const UI_BLOCK_SIZE: usize,
-    const STACK_SIZE: usize,
 > {
     pub pliot: Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, S>,
-    pub stack: Vec<StackWord, STACK_SIZE>,
 }
 
 pub struct Disconnected {}
@@ -42,7 +39,6 @@ pub async fn io_loop<
     const MAX_RESULT: usize,
     const PROGRAM_BLOCK_SIZE: usize,
     const UI_BLOCK_SIZE: usize,
-    const STACK_SIZE: usize,
     const USB_BUF_SIZE: usize,
     const IN_CAP: usize,
     const OUT_CAP: usize,
@@ -51,7 +47,7 @@ pub async fn io_loop<
     sender: &mut VendorSender<'d, D>,
     shared: &'static Mutex<
         CriticalSectionRawMutex,
-        PliotShared<'a, 'b, S, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, STACK_SIZE>,
+        PliotShared<'a, 'b, S, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>,
     >,
     usb_buf: &mut [u8; USB_BUF_SIZE],
     frame: &mut Vec<u8, IN_CAP>,
@@ -75,9 +71,8 @@ where
                 let mut out_buf = [0u8; OUT_CAP];
                 let wrote = {
                     let mut guard = shared.lock().await;
-                    let PliotShared { pliot, stack } = &mut *guard;
+                    let PliotShared { pliot } = &mut *guard;
                     let result = pliot.process_message(
-                        stack,
                         frame.as_mut_slice(),
                         out_buf.as_mut_slice(),
                     );
@@ -85,7 +80,6 @@ where
                     match result {
                         Ok(wrote) => wrote,
                         Err(_) => {
-                            stack.clear();
                             0
                         }
                     }

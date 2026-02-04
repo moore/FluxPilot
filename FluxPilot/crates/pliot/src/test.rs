@@ -198,9 +198,8 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut stack: Vec<StackWord, 100> = Vec::new();
-    let mut globals = [0u16; 10];
-    let memory = globals.as_mut_slice();
+    let mut memory = [0u16; 128];
+    let memory = memory.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
             &mut storage,
@@ -216,7 +215,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let mut in_buf = to_vec_cobs::<ProtocolType, 2048>(&message).unwrap();
 
         let wrote = pliot
-            .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())
+            .process_message(&mut in_buf[..], out_buf.as_mut_slice())
             .expect("Call had error");
 
         assert_eq!(0, wrote);
@@ -243,7 +242,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
 
         let wrote = pliot
-            .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())
+            .process_message(&mut in_buf[..], out_buf.as_mut_slice())
             .expect("Call had error");
 
         assert_ne!(0, wrote);
@@ -265,12 +264,9 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         assert_eq!(message.get_request_id(), response.get_request_id());
     }
 
-    assert_eq!(stack.len(), 0);
-
     {
         let args = Vec::<StackWord, MAX_ARGS>::new();
 
-        println!("stack is {:?}", stack);
         let type_id = descriptor.instances[0].type_id as usize;
         let get_function_index = descriptor.types[type_id].functions[1].clone();
         let function = FunctionId {
@@ -285,7 +281,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let mut in_buf = to_vec_cobs::<ProtocolType, 100>(&message).unwrap();
 
         let wrote = pliot
-            .process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())
+            .process_message(&mut in_buf[..], out_buf.as_mut_slice())
             .expect("Call had error");
 
         assert_ne!(0, wrote);
@@ -301,11 +297,10 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
                 result,
             } => {
                 assert_eq!(result.len(), 3);
-                let r = stack.pop().unwrap();
-                let g = stack.pop().unwrap();
-                let b = stack.pop().unwrap();
-
-                assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
+                assert_eq!(
+                    (result[0] as u16, result[1] as u16, result[2] as u16),
+                    (red, green, blue)
+                );
             }
             _ => panic!("response was not Return"),
         }
@@ -357,9 +352,8 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
-    let mut globals = [0u16; 32];
-    let memory = globals.as_mut_slice();
+    let mut memory = [0u16; 256];
+    let memory = memory.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
             &mut storage,
@@ -372,7 +366,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
 
     for message in loader {
         let mut in_buf = to_vec_cobs::<ProtocolType, 2048>(&message).unwrap();
-        let wrote = pliot.process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())?;
+        let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
         assert_eq!(0, wrote);
     }
 
@@ -380,12 +374,8 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     assert_eq!(machine_count, MACHINE_COUNT as ProgramWord);
 
     for (machine_index, init) in init_values.iter().enumerate() {
-        stack.clear();
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
         let (r, g, b) =
-            pliot.get_led_color(machine_index as ProgramWord, 0, 0u32, &mut stack)?;
+            pliot.get_led_color(machine_index as ProgramWord, 0, 0u32, (0, 0, 0))?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -398,11 +388,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     for i in 8000..8100 {
         for j in 0..256 {
             for machine_index in 0..machine_count {
-                stack.clear();
-                stack.push(0).unwrap();
-                stack.push(0).unwrap();
-                stack.push(0).unwrap();
-                pliot.get_led_color(machine_index, j, i as u32, &mut stack)?;
+                pliot.get_led_color(machine_index, j, i as u32, (0, 0, 0))?;
             }
         }
     }
@@ -448,9 +434,8 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut stack: Vec<StackWord, 32> = Vec::new();
-    let mut globals = [0u16; 8];
-    let memory = globals.as_mut_slice();
+    let mut memory = [0u16; 128];
+    let memory = memory.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
             &mut storage,
@@ -463,13 +448,13 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
 
     for message in loader {
         let mut in_buf = to_vec_cobs::<ProtocolType, 2048>(&message).unwrap();
-        let wrote = pliot.process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())?;
+        let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
         assert_eq!(0, wrote);
     }
 
     let read_block = controler.read_ui_state(0);
     let mut in_buf = to_vec_cobs::<ProtocolType, 256>(&read_block).unwrap();
-    let wrote = pliot.process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())?;
+    let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
     let response: ProtocolType =
         from_bytes_cobs(&mut out_buf[..wrote]).expect("could not read response");
     match response {
@@ -488,7 +473,7 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
 
     let read_block = controler.read_ui_state(1);
     let mut in_buf = to_vec_cobs::<ProtocolType, 256>(&read_block).unwrap();
-    let wrote = pliot.process_message(&mut stack, &mut in_buf[..], out_buf.as_mut_slice())?;
+    let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
     let response: ProtocolType =
         from_bytes_cobs(&mut out_buf[..wrote]).expect("could not read response");
     match response {

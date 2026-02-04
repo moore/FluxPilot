@@ -24,8 +24,8 @@ const MAX_ARGS: usize = 10;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 64;
 const UI_BLOCK_SIZE: usize = 128;
-const ASM_MACHINE_MAX: usize = 8;
-const ASM_FUNCTION_MAX: usize = 32;
+const ASM_MACHINE_MAX: usize = 256;
+const ASM_FUNCTION_MAX: usize = 256;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>;
 

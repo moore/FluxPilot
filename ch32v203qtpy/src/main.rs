@@ -38,6 +38,7 @@ use {ch32_hal as hal, panic_halt as _};
 
 use crate::ws2812::Ws2812;
 use smart_leds::{SmartLedsWrite, RGB8};
+use light_machine::{ProgramWord, StackWord};
 use ws2812_spi as ws2812;
 
 use fluxpilot_firmware::led::led_loop;
@@ -75,6 +76,10 @@ const PROGRAM_BUFFER_SIZE: usize = 1024;
 const UI_STATE_BUFFER_SIZE: usize = 1024;
 const USB_RECEIVE_BUF_SIZE: usize = 265; // BUG: I don't know the correct size
 const STACK_SIZE: usize = 100;
+const STACK_WORDS_PER_STACKWORD: usize =
+    core::mem::size_of::<StackWord>() / core::mem::size_of::<ProgramWord>();
+const GLOBALS_SIZE: usize = 10;
+const RUNTIME_MEMORY_WORDS: usize = GLOBALS_SIZE + STACK_SIZE * STACK_WORDS_PER_STACKWORD;
 #[cfg(feature = "storage-flash")]
 const FLASH_BASE: usize = 0x0000_0000;
 #[cfg(all(feature = "storage-mem", feature = "storage-flash"))]
@@ -84,7 +89,7 @@ compile_error!("Enable exactly one of `storage-mem` or `storage-flash` features.
 
 static PROGRAM_BUFFER: StaticCell<[u16; PROGRAM_BUFFER_SIZE]> = StaticCell::new();
 static UI_STATE_BUFFER: StaticCell<[u8; UI_STATE_BUFFER_SIZE]> = StaticCell::new();
-static GLOBALS: StaticCell<[u16; 10]> = StaticCell::new();
+static RUNTIME_MEMORY: StaticCell<[u16; RUNTIME_MEMORY_WORDS]> = StaticCell::new();
 #[cfg(feature = "storage-mem")]
 static MEM_STORAGE: StaticCell<MemStorage<'static>> = StaticCell::new();
 #[cfg(feature = "storage-flash")]
@@ -111,7 +116,6 @@ type SharedState =
         MAX_RESULT,
         PROGRAM_BLOCK_SIZE,
         UI_BLOCK_SIZE,
-        STACK_SIZE,
     >;
 
 static mut DEBUG_WS: *mut Ws2812<Spi<'static, peripherals::SPI1, hal::mode::Blocking>> =
@@ -217,7 +221,7 @@ async fn main(spawner: Spawner) -> () {
     let usb = builder.build();
 
     /////////////////////////////////////////////////
-    let globals = GLOBALS.init([0u16; 10]);
+    let memory = RUNTIME_MEMORY.init([0u16; RUNTIME_MEMORY_WORDS]);
     #[cfg(feature = "storage-mem")]
     let storage = {
         let program_buffer = PROGRAM_BUFFER.init([0u16; PROGRAM_BUFFER_SIZE]);
@@ -287,13 +291,12 @@ async fn main(spawner: Spawner) -> () {
     };
 
     let shared = PLIOT_SHARED.init(Mutex::new(PliotShared {
-        pliot: Pliot::new(storage, globals.as_mut_slice()),
-        stack: Vec::new(),
+        pliot: Pliot::new(storage, memory.as_mut_slice()),
     }));
     {
         let mut guard = shared.lock().await;
-        let PliotShared { pliot, stack } = &mut *guard;
-        if pliot.init(stack).is_err() {
+        let PliotShared { pliot } = &mut *guard;
+        if pliot.init().is_err() {
             debug_mark((32,0,0).into());
             // BUG: add Logging
             return;
@@ -317,7 +320,6 @@ async fn main(spawner: Spawner) -> () {
         MAX_RESULT,
         PROGRAM_BLOCK_SIZE,
         UI_BLOCK_SIZE,
-        STACK_SIZE,
         NUM_LEDS,
         FRAME_TARGET,
     >(&mut ws, data, shared)
@@ -350,7 +352,6 @@ async fn io_task(
             MAX_RESULT,
             PROGRAM_BLOCK_SIZE,
             UI_BLOCK_SIZE,
-            STACK_SIZE,
             USB_RECEIVE_BUF_SIZE,
             INCOMING_MESSAGE_CAP,
             OUTGOING_MESSAGE_CAP,

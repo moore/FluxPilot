@@ -843,9 +843,11 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
             setStatus(error);
             return;
         }
-        const programBuffer = new Uint16Array(512);
+        const programBuffer = new Uint16Array(4096);
         try {
             const descriptor = compile_program(source, programBuffer);
+            console.log("program length: ", descriptor.length);
+
             const uiStateBytes = await buildCompressedUiState();
             deck.load_program(programBuffer, descriptor.length, uiStateBytes);
             setStatus(`Loaded program (${descriptor.length} words)`);
@@ -865,9 +867,10 @@ if (!globalThis[HANDLERS_BOUND_KEY]) {
         setStatus(error);
         return;
     }
-    const programBuffer = new Uint16Array(512);
+    const programBuffer = new Uint16Array(4096);
     try {
         const descriptor = compile_program(programSource, programBuffer);
+        console.log("program length: ", descriptor.length);
         const uiStateBytes = await buildCompressedUiState();
         deck.load_program(programBuffer, descriptor.length, uiStateBytes);
         setStatus(`Loaded program (${descriptor.length} words)`);

@@ -7,6 +7,7 @@ use std::println;
 use std::format;
 use std::string::{String, ToString};
 use std::vec::Vec as StdVec;
+use std::vec;
 
 const STACK_CAP: usize = 32;
 const ASM_MACHINE_MAX: usize = 1;
@@ -54,13 +55,47 @@ fn assemble_program_with_shared(
     buffer[..descriptor.length].to_vec()
 }
 
+fn make_memory(program: &[ProgramWord], stack_capacity: usize) -> StdVec<ProgramWord> {
+    let globals_size = program
+        .get(GLOBALS_SIZE_OFFSET)
+        .copied()
+        .unwrap_or(0);
+    let stack_bottom = stack_bottom_for_globals(globals_size);
+    let stack_ratio = core::mem::size_of::<StackWord>() / core::mem::size_of::<ProgramWord>();
+    let total_words = stack_bottom + stack_capacity * stack_ratio;
+    vec![0u16; total_words]
+}
+
 fn run_single(
     program: &[ProgramWord],
     globals: &mut [ProgramWord],
     stack: &mut Vec<StackWord, STACK_CAP>,
 ) -> Result<(), MachineError> {
-    let mut program = Program::new(program, globals)?;
-    program.call(0, 0, stack)
+    let mut memory = make_memory(program, STACK_CAP);
+    let globals_len = globals.len();
+    if globals_len > memory.len() {
+        return Err(MachineError::GlobalsBufferTooSmall(
+            ProgramWord::try_from(globals_len).unwrap_or(ProgramWord::MAX),
+        ));
+    }
+    memory[..globals_len].copy_from_slice(globals);
+    let mut program = Program::new(program, memory.as_mut_slice())?;
+    {
+        let stack_slice = program.stack_mut();
+        stack_slice.clear();
+        for value in stack.iter() {
+            stack_slice.push(*value)?;
+        }
+    }
+    program.call(0, 0)?;
+    stack.clear();
+    for value in program.stack().as_slice() {
+        if stack.push(*value).is_err() {
+            return Err(MachineError::StackOverflow);
+        }
+    }
+    globals.copy_from_slice(&memory[..globals_len]);
+    Ok(())
 }
 
 #[test]
@@ -80,12 +115,14 @@ fn test_shared_function_call() -> Result<(), MachineError> {
         ".end",
     ];
     let program_words = assemble_program_with_shared(&lines, 1, 1);
-    let mut globals = [0u16; 4];
-    globals[0] = 42;
-    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
-    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
-    program.call(0, 0, &mut stack)?;
-    let value = stack.pop().ok_or(MachineError::StackUnderFlow)?;
+    let mut memory = make_memory(&program_words, STACK_CAP);
+    memory[0] = 42;
+    let mut program = Program::new(&program_words, memory.as_mut_slice())?;
+    program.call(0, 0)?;
+    let value = program
+        .stack_mut()
+        .pop()
+        .ok_or(MachineError::StackUnderFlow)?;
     assert_eq!(value, 42);
     Ok(())
 }
@@ -105,10 +142,9 @@ fn test_shared_function_index_out_of_range() -> Result<(), MachineError> {
         ".end",
     ];
     let program_words = assemble_program_with_shared(&lines, 1, 1);
-    let mut globals = [0u16; 4];
-    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
-    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
-    let err = program.call(0, 0, &mut stack).unwrap_err();
+    let mut memory = make_memory(&program_words, STACK_CAP);
+    let mut program = Program::new(&program_words, memory.as_mut_slice())?;
+    let err = program.call(0, 0).unwrap_err();
     assert!(matches!(err, MachineError::SharedFunctionIndexOutOfRange(_)));
     Ok(())
 }
@@ -131,11 +167,13 @@ fn test_shared_function_can_access_locals() -> Result<(), MachineError> {
         ".end",
     ];
     let program_words = assemble_program_with_shared(&lines, 1, 1);
-    let mut globals = [0u16; 4];
-    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
-    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
-    program.call(0, 0, &mut stack)?;
-    let value = stack.pop().ok_or(MachineError::StackUnderFlow)?;
+    let mut memory = make_memory(&program_words, STACK_CAP);
+    let mut program = Program::new(&program_words, memory.as_mut_slice())?;
+    program.call(0, 0)?;
+    let value = program
+        .stack_mut()
+        .pop()
+        .ok_or(MachineError::StackUnderFlow)?;
     assert_eq!(value, 99);
     Ok(())
 }
@@ -154,23 +192,57 @@ fn test_shared_function_call_underflow() -> Result<(), MachineError> {
         ".end",
     ];
     let program_words = assemble_program_with_shared(&lines, 1, 1);
-    let mut globals = [0u16; 4];
-    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
-    let mut program = Program::new(&program_words, globals.as_mut_slice())?;
-    let err = program.call(0, 0, &mut stack).unwrap_err();
+    let mut memory = make_memory(&program_words, STACK_CAP);
+    let mut program = Program::new(&program_words, memory.as_mut_slice())?;
+    let err = program.call(0, 0).unwrap_err();
     assert!(matches!(err, MachineError::StackUnderFlow));
     Ok(())
 }
 
 #[test]
 fn test_invalid_program_version() {
-    let mut globals = [0u16; 1];
     let program = [0u16, 0, 0, 0];
-    let err = match Program::new(&program, globals.as_mut_slice()) {
+    let mut memory = make_memory(&program, STACK_CAP);
+    let err = match Program::new(&program, memory.as_mut_slice()) {
         Ok(_) => panic!("expected error"),
         Err(err) => err,
     };
     assert!(matches!(err, MachineError::InvalidProgramVersion(_)));
+}
+
+#[test]
+fn test_memory_too_small_for_aligned_stack_bottom() {
+    let program = assemble_program(&[
+        ".machine main locals 3 functions 1",
+        ".func main index 0",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut memory = vec![0u16; 3];
+    let err = match Program::new(program.as_slice(), memory.as_mut_slice()) {
+        Ok(_) => panic!("expected error"),
+        Err(err) => err,
+    };
+    assert!(matches!(err, MachineError::MemoryBufferTooSmall { .. }));
+}
+
+#[test]
+fn test_min_stack_capacity_overflow() -> Result<(), MachineError> {
+    let program = assemble_program(&[
+        ".machine main locals 0 functions 1",
+        ".func main index 0",
+        "PUSH 1",
+        "PUSH 2",
+        "EXIT",
+        ".end",
+        ".end",
+    ]);
+    let mut memory = make_memory(program.as_slice(), 1);
+    let mut program = Program::new(program.as_slice(), memory.as_mut_slice())?;
+    let err = program.call(0, 0).unwrap_err();
+    assert!(matches!(err, MachineError::StackOverflow));
+    Ok(())
 }
 
 fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> StdVec<String> {
@@ -308,22 +380,21 @@ fn test_locals_are_machine_scoped() -> Result<(), MachineError> {
 
     let descriptor = asm.finish().unwrap();
     let program = &buffer[..descriptor.length];
-    let mut globals = [0u16; 2];
-    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
+    let mut memory = make_memory(program, STACK_CAP);
 
     {
-        let mut program = Program::new(program, globals.as_mut_slice())?;
-        stack.push(11).unwrap();
-        program.call(0, 0, &mut stack)?;
+        let mut program = Program::new(program, memory.as_mut_slice())?;
+        program.stack_mut().push(11)?;
+        program.call(0, 0)?;
     }
-    assert_eq!(globals, [11, 0]);
+    assert_eq!(&memory[..2], &[11, 0]);
 
     {
-        let mut program = Program::new(program, globals.as_mut_slice())?;
-        stack.push(22).unwrap();
-        program.call(1, 0, &mut stack)?;
+        let mut program = Program::new(program, memory.as_mut_slice())?;
+        program.stack_mut().push(22)?;
+        program.call(1, 0)?;
     }
-    assert_eq!(globals, [11, 22]);
+    assert_eq!(&memory[..2], &[11, 22]);
     Ok(())
 }
 
@@ -365,26 +436,28 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     println!("program length {}", descriptor.length);
 
     let program = &buffer[..descriptor.length];
-    let mut globals = [0u16; 32];
-    let mut stack: Vec<StackWord, STACK_CAP> = Vec::new();
-    let mut program = Program::new(program, globals.as_mut_slice())?;
+    let mut memory = make_memory(program, STACK_CAP);
+    let mut program = Program::new(program, memory.as_mut_slice())?;
 
     let machine_count = program.machine_count()?;
 
     assert_eq!(machine_count, MACHINE_COUNT as u16);
 
     for machine_index in 0..machine_count {
-        program.init_machine(machine_index as ProgramWord, &mut stack)?;
-        assert!(stack.is_empty());
+        program.init_machine(machine_index as ProgramWord)?;
+        assert!(program.stack().is_empty());
     }
 
     for (machine_index, init) in init_values.iter().enumerate() {
-        stack.clear();
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
+        {
+            let stack = program.stack_mut();
+            stack.clear();
+            stack.push(0)?;
+            stack.push(0)?;
+            stack.push(0)?;
+        }
         let (r, g, b) =
-            program.get_led_color(machine_index as ProgramWord, 0, 0u32, &mut stack)?;
+            program.get_led_color(machine_index as ProgramWord, 0, 0u32)?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -397,11 +470,14 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     for i in  8000..8100 {
         for j in 0..256 {
             for machine_index in 0..machine_count {
-                stack.clear();
-                stack.push(0).unwrap();
-                stack.push(0).unwrap();
-                stack.push(0).unwrap();
-                program.get_led_color(machine_index as ProgramWord, j as u16, i as u32, &mut stack)?;
+                {
+                    let stack = program.stack_mut();
+                    stack.clear();
+                    stack.push(0)?;
+                    stack.push(0)?;
+                    stack.push(0)?;
+                }
+                program.get_led_color(machine_index as ProgramWord, j as u16, i as u32)?;
             
             }
         }
@@ -432,38 +508,34 @@ fn test_init_get_color() -> Result<(), MachineError> {
 
     println!("program {:?}", program);
 
-    let mut globals = [0u16; 10];
+    let mut memory = make_memory(program.as_slice(), 100);
     let (red, green, blue): (u16, u16, u16) = (17, 23, 31);
-    let mut stack: Vec<StackWord, 100> = Vec::new();
 
+    let mut program = Program::new(program.as_slice(), memory.as_mut_slice())?;
     {
-        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
-
-        stack.push(StackWord::from(red)).unwrap();
-        stack.push(StackWord::from(green)).unwrap();
-        stack.push(StackWord::from(blue)).unwrap();
-        program.init_machine(0, &mut stack)?;
+        let stack = program.stack_mut();
+        stack.push(StackWord::from(red))?;
+        stack.push(StackWord::from(green))?;
+        stack.push(StackWord::from(blue))?;
     }
-    assert_eq!(stack.len(), 0);
+    program.init_machine(0)?;
+    assert_eq!(program.stack().len(), 0);
 
-    println!("memory {:?}", globals);
-
+    println!("stack is {:?}", program.stack().as_slice());
     {
-        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
-
-        println!("stack is {:?}", stack);
-
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        let (r, g, b) = program
-            .get_led_color(0, 31337, 17u32, &mut stack)
-            .expect("Could not get led color");
-
-        println!("stack is {:?}", stack);
-        assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
+        let stack = program.stack_mut();
+        stack.push(0)?;
+        stack.push(0)?;
+        stack.push(0)?;
     }
+    let (r, g, b) = program
+        .get_led_color(0, 31337, 17u32)
+        .expect("Could not get led color");
 
+    println!("stack is {:?}", program.stack().as_slice());
+    assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
+
+    let stack = program.stack();
     assert_eq!(stack.len(), 5);
     assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
     assert_eq!((stack[3], stack[4]), (31337, 17));
@@ -495,53 +567,54 @@ fn test_init_get_color2() -> Result<(), MachineError> {
 
     println!("program {:?}", program);
 
-    let mut globals = [0u16; 10];
+    let mut memory = make_memory(program.as_slice(), 100);
     let (red, green, blue): (u16, u16, u16) = (17, 23, 31);
-    let mut stack: Vec<StackWord, 100> = Vec::new();
 
+    let mut program = Program::new(program.as_slice(), memory.as_mut_slice())?;
     {
-        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
-
-        stack.push(StackWord::from(red)).unwrap();
-        stack.push(StackWord::from(green)).unwrap();
-        stack.push(StackWord::from(blue)).unwrap();
-        program.init_machine(0, &mut stack)?;
+        let stack = program.stack_mut();
+        stack.push(StackWord::from(red))?;
+        stack.push(StackWord::from(green))?;
+        stack.push(StackWord::from(blue))?;
     }
-    assert_eq!(stack.len(), 0);
+    program.init_machine(0)?;
+    assert_eq!(program.stack().len(), 0);
 
-    println!("memory {:?}", globals);
+    println!("stack is {:?}", program.stack().as_slice());
+    {
+        let stack = program.stack_mut();
+        stack.push(0)?;
+        stack.push(0)?;
+        stack.push(0)?;
+    }
+    let (r, g, b) = program
+        .get_led_color(0, 31337, 1u32)
+        .expect("Could not get led color");
+
+    println!("stack is {:?}", program.stack().as_slice());
+    assert_eq!((r as u16, g as u16, b as u16), (red + 1, green, blue));
 
     {
-        let mut program = Program::new(program.as_slice(), globals.as_mut_slice())?;
-
-        println!("stack is {:?}", stack);
-
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        let (r, g, b) = program
-            .get_led_color(0, 31337, 1u32, &mut stack)
-            .expect("Could not get led color");
-
-        println!("stack is {:?}", stack);
-        assert_eq!((r as u16, g as u16, b as u16), (red + 1, green, blue));
-
+        let stack = program.stack();
         assert_eq!(stack.len(), 4);
         assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
         assert_eq!(stack[3], 31337);
-        stack.clear();
-
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        stack.push(0).unwrap();
-        let (r, g, b) = program
-            .get_led_color(0, 31337, 30u32, &mut stack)
-            .expect("Could not get led color");
-
-        println!("stack is {:?}", stack);
-        assert_eq!((r as u16, g as u16, b as u16), (red + 30, green, blue));
     }
+    {
+        let stack = program.stack_mut();
+        stack.clear();
+        stack.push(0)?;
+        stack.push(0)?;
+        stack.push(0)?;
+    }
+    let (r, g, b) = program
+        .get_led_color(0, 31337, 30u32)
+        .expect("Could not get led color");
 
+    println!("stack is {:?}", program.stack().as_slice());
+    assert_eq!((r as u16, g as u16, b as u16), (red + 30, green, blue));
+
+    let stack = program.stack();
     assert_eq!(stack.len(), 4);
     assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
     assert_eq!(stack[3], 31337);
