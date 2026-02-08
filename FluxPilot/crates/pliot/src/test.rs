@@ -177,9 +177,9 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut function = machine
         .new_function()
         .expect("could not get fucntion builder");
-    function.add_op(Op::LocalStore(0)).expect("could not add op");
-    function.add_op(Op::LocalStore(1)).expect("could not add op");
     function.add_op(Op::LocalStore(2)).expect("could not add op");
+    function.add_op(Op::LocalStore(1)).expect("could not add op");
+    function.add_op(Op::LocalStore(0)).expect("could not add op");
     function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 

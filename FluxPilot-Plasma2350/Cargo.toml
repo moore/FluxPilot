@@ -3,6 +3,12 @@ name = "fluxpilot_plasma2350"
 version = "0.2.0"
 edition = "2024"
 
+[[bin]]
+name = "fluxpilot_plasma2350"
+path = "src/main.rs"
+test = false
+bench = false
+
 [dependencies]
 # Cortex-M 
 cortex-m = "0.7.7"

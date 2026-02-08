@@ -267,6 +267,32 @@ impl<F: NorFlash> FlashStorage<F> {
         if self.active_slot == 0 { 1 } else { 0 }
     }
 
+    fn slice_program_words<'a>(
+        &'a self,
+        start: usize,
+        program_words: usize,
+    ) -> Option<&'a [ProgramWord]> {
+        let bytes_len = program_words.checked_mul(WORD_SIZE_BYTES)?;
+        let end = start.checked_add(bytes_len)?;
+        if start < self.storage_start || end > self.storage_end {
+            return None;
+        }
+        if !start.is_multiple_of(core::mem::align_of::<ProgramWord>()) {
+            return None;
+        }
+        // SAFETY: Bounds and alignment are checked against the linker-defined storage range.
+        Some(unsafe { core::slice::from_raw_parts(start as *const ProgramWord, program_words) })
+    }
+
+    fn slice_bytes<'a>(&'a self, start: usize, len: usize) -> Option<&'a [u8]> {
+        let end = start.checked_add(len)?;
+        if start < self.storage_start || end > self.storage_end {
+            return None;
+        }
+        // SAFETY: Bounds are checked against the linker-defined storage range.
+        Some(unsafe { core::slice::from_raw_parts(start as *const u8, len) })
+    }
+
     fn program_slice_for_slot<'a>(
         &'a self,
         slot: usize,
@@ -280,9 +306,7 @@ impl<F: NorFlash> FlashStorage<F> {
         if program_words > max_len {
             return None;
         }
-        // SAFETY: The storage region is linker-defined, word-aligned, and lives for the
-        // program lifetime, so it's valid to create a static slice over it.
-        Some(unsafe { core::slice::from_raw_parts(start as *const ProgramWord, program_words) })
+        self.slice_program_words(start, program_words)
     }
 
     fn validate_program_crc(&self, slot: usize, program_words: usize, expected_crc: u32) -> bool {
@@ -347,9 +371,7 @@ impl<F: NorFlash> FlashStorage<F> {
         if ui_end > slot_end {
             return None;
         }
-        let len = ui_state_len;
-        // SAFETY: The storage region is linker-defined and valid for program lifetime.
-        Some(unsafe { core::slice::from_raw_parts(ui_start as *const u8, len) })
+        self.slice_bytes(ui_start, ui_state_len)
     }
 
     fn validate_ui_state_crc(
@@ -377,9 +399,7 @@ impl<F: NorFlash> FlashStorage<F> {
             .map(|len| len / WORD_SIZE_BYTES)
             .unwrap_or(0);
         let len = self.program_words.min(max_len);
-        // SAFETY: The storage region is linker-defined, word-aligned, and lives for the
-        // program lifetime, so it's valid to create a static slice over it.
-        unsafe { core::slice::from_raw_parts(start as *const ProgramWord, len) }
+        self.slice_program_words(start, len).unwrap_or(&[])
     }
 
     fn program_bounds(&self, slot: usize) -> Option<(usize, usize)> {
@@ -978,6 +998,18 @@ mod tests {
     const FLASH_BYTES: usize = 4096;
     const FLASH_WORDS: usize = FLASH_BYTES / WORD_SIZE_BYTES;
 
+    fn program_words_as_bytes(storage: &[ProgramWord]) -> &[u8] {
+        let len = storage.len() * WORD_SIZE_BYTES;
+        // SAFETY: ProgramWord is 2 bytes and we only re-interpret as raw bytes.
+        unsafe { core::slice::from_raw_parts(storage.as_ptr() as *const u8, len) }
+    }
+
+    fn program_words_as_bytes_mut(storage: &mut [ProgramWord]) -> &mut [u8] {
+        let len = storage.len() * WORD_SIZE_BYTES;
+        // SAFETY: ProgramWord is 2 bytes and we only re-interpret as raw bytes.
+        unsafe { core::slice::from_raw_parts_mut(storage.as_mut_ptr() as *mut u8, len) }
+    }
+
     struct MockFlash {
         storage: std::vec::Vec<ProgramWord>,
     }
@@ -990,13 +1022,11 @@ mod tests {
         }
 
         fn bytes(&self) -> &[u8] {
-            let len = self.storage.len() * WORD_SIZE_BYTES;
-            unsafe { core::slice::from_raw_parts(self.storage.as_ptr() as *const u8, len) }
+            program_words_as_bytes(&self.storage)
         }
 
         fn bytes_mut(&mut self) -> &mut [u8] {
-            let len = self.storage.len() * WORD_SIZE_BYTES;
-            unsafe { core::slice::from_raw_parts_mut(self.storage.as_mut_ptr() as *mut u8, len) }
+            program_words_as_bytes_mut(&mut self.storage)
         }
 
         fn corrupt_byte(&mut self, offset: usize) {

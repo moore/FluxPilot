@@ -19,10 +19,9 @@
 )]
 #![cfg_attr(not(test), warn(clippy::missing_panics_doc))]
 
-use core::mem::{align_of, transmute, size_of};
+use core::mem::{align_of, size_of};
 use heapless::Vec;
 use thiserror_no_std::Error;
-use variant_count::VariantCount;
 
 use crate::builder::FunctionIndex;
 
@@ -253,7 +252,7 @@ fn set_value<E>(
 }
 
 #[repr(u16)] // Must match ProgramWord
-#[derive(VariantCount, Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Ops {
     Pop,
     Push,
@@ -300,15 +299,43 @@ impl From<Ops> for ProgramWord {
 impl TryFrom<ProgramWord> for Ops {
     type Error = MachineError;
     fn try_from(value: ProgramWord) -> Result<Self, Self::Error> {
-        // SAFTY: we require Ops to be in range of u16
-        // with `repr` macro.
-        if value >= Ops::VARIANT_COUNT as u16 {
-            return Err(MachineError::InvalidOp(value));
+        match value {
+            0 => Ok(Ops::Pop),
+            1 => Ok(Ops::Push),
+            2 => Ok(Ops::BranchLessThan),
+            3 => Ok(Ops::BranchLessThanEq),
+            4 => Ok(Ops::BranchGreaterThan),
+            5 => Ok(Ops::BranchGreaterThanEq),
+            6 => Ok(Ops::BranchEqual),
+            7 => Ok(Ops::And),
+            8 => Ok(Ops::Or),
+            9 => Ok(Ops::Xor),
+            10 => Ok(Ops::Not),
+            11 => Ok(Ops::BitwiseAnd),
+            12 => Ok(Ops::BitwiseOr),
+            13 => Ok(Ops::BitwiseXor),
+            14 => Ok(Ops::BitwiseNot),
+            15 => Ok(Ops::Multiply),
+            16 => Ok(Ops::Divide),
+            17 => Ok(Ops::Mod),
+            18 => Ok(Ops::Add),
+            19 => Ok(Ops::Subtract),
+            20 => Ok(Ops::LocalLoad),
+            21 => Ok(Ops::LocalStore),
+            22 => Ok(Ops::GlobalLoad),
+            23 => Ok(Ops::GlobalStore),
+            24 => Ok(Ops::LoadStatic),
+            25 => Ok(Ops::Jump),
+            26 => Ok(Ops::Exit),
+            27 => Ok(Ops::Call),
+            28 => Ok(Ops::CallShared),
+            29 => Ok(Ops::StackLoad),
+            30 => Ok(Ops::StackStore),
+            31 => Ok(Ops::Dup),
+            32 => Ok(Ops::Swap),
+            33 => Ok(Ops::Return),
+            _ => Err(MachineError::InvalidOp(value)),
         }
-
-        // SAFTY: We just check that the value is in range.
-        let op = unsafe { transmute::<ProgramWord, Self>(value) };
-        Ok(op)
     }
 }
 
@@ -685,14 +712,12 @@ impl<'a, 'b> Program<'a, 'b> {
         let mut pc = entry_point;
         let locals_base = self.instance_globals_offset(machine_number)?;
         self.locals_base = locals_base;
-        let stack_ptr = core::ptr::addr_of_mut!(self.stack);
-
         loop {
             let word = read_static(pc, self.static_data)?;
             let op = word.try_into()?;
             match op {
                 Ops::Pop => {
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     if stack.pop().is_none() {
                         return Err(MachineError::PopOnEmptyStack);
                     }
@@ -700,16 +725,16 @@ impl<'a, 'b> Program<'a, 'b> {
                 Ops::Push => {
                     pc = next_pc(pc)?;
                     let word = read_static(pc, self.static_data)?;
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, program_word_to_stack(word))?;
                 }
                 Ops::BranchLessThan => {
                     let target = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program_index(pop(stack)?)?
                     };
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     if lhs < rhs {
@@ -719,11 +744,11 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::BranchLessThanEq => {
                     let target = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program_index(pop(stack)?)?
                     };
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     if lhs <= rhs {
@@ -733,11 +758,11 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::BranchGreaterThan => {
                     let target = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program_index(pop(stack)?)?
                     };
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     if lhs > rhs {
@@ -747,11 +772,11 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::BranchGreaterThanEq => {
                     let target = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program_index(pop(stack)?)?
                     };
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     if lhs >= rhs {
@@ -761,11 +786,11 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::BranchEqual => {
                     let target = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program_index(pop(stack)?)?
                     };
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     if lhs == rhs {
@@ -775,116 +800,116 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::And => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     let result = if lhs != 0 && rhs != 0 { 1 } else { 0 };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, result)?;
                 }
                 Ops::Or => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     let result = if lhs != 0 || rhs != 0 { 1 } else { 0 };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, result)?;
                 }
                 Ops::Xor => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     let result = if (lhs != 0) ^ (rhs != 0) { 1 } else { 0 };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, result)?;
                 }
                 Ops::Not => {
                     let value = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop(stack)?
                     };
                     let result = if value == 0 { 1 } else { 0 };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, result)?;
                 }
                 Ops::BitwiseAnd => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, lhs & rhs)?;
                 }
                 Ops::BitwiseOr => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, lhs | rhs)?;
                 }
                 Ops::BitwiseXor => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, lhs ^ rhs)?;
                 }
                 Ops::BitwiseNot => {
                     let value = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, !value)?;
                 }
                 Ops::Multiply => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, lhs.wrapping_mul(rhs))?;
                 }
                 Ops::Divide => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     let result = lhs
                         .checked_div(rhs)
                         .ok_or(MachineError::InvalidOp(word))?;
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, result)?;
                 }
                 Ops::Mod => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
                     let result = lhs
                         .checked_rem(rhs)
                         .ok_or(MachineError::InvalidOp(word))?;
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, result)?;
                 }
                 Ops::Add => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, lhs.wrapping_add(rhs))?;
                 }
                 Ops::Subtract => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, lhs.wrapping_sub(rhs))?;
                 }
                 Ops::LocalLoad => {
@@ -904,7 +929,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     let index = index as usize;
 
                     let word = read_global(index, self.globals)?;
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, program_word_to_stack(word))?;
                 }
                 Ops::LocalStore => {
@@ -922,7 +947,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     let index = index as usize;
 
                     let word = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program(pop(stack)?)?
                     };
 
@@ -944,7 +969,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     let index = word as usize;
 
                     let word = read_global(index, self.globals)?;
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, program_word_to_stack(word))?;
                 }
                 Ops::GlobalStore => {
@@ -956,7 +981,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     let index = word as usize;
 
                     let word = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program(pop(stack)?)?
                     };
 
@@ -969,16 +994,16 @@ impl<'a, 'b> Program<'a, 'b> {
                 }
                 Ops::LoadStatic => {
                     let addr = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program_index(pop(stack)?)?
                     };
                     let value = read_static(addr, self.static_data)?;
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, program_word_to_stack(value))?;
                 }
                 Ops::Jump => {
                     let target = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack_word_to_program_index(pop(stack)?)?
                     };
                     pc = target;
@@ -993,10 +1018,10 @@ impl<'a, 'b> Program<'a, 'b> {
                         .checked_add(offset)
                         .ok_or(MachineError::StackUnderFlow)?;
                     let value = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         *stack.get(index).ok_or(MachineError::StackUnderFlow)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, value)?;
                 }
                 Ops::StackStore => {
@@ -1008,35 +1033,35 @@ impl<'a, 'b> Program<'a, 'b> {
                         .checked_add(offset)
                         .ok_or(MachineError::StackUnderFlow)?;
                     let value = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         *stack.last().ok_or(MachineError::StackUnderFlow)?
                     };
                     {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         let slot = stack
                             .get_mut(index)
                             .ok_or(MachineError::StackUnderFlow)?;
                         *slot = value;
                     }
                     let _ = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop(stack)?
                     };
                 }
                 Ops::Dup => {
                     let value = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         *stack.last().ok_or(MachineError::StackUnderFlow)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, value)?;
                 }
                 Ops::Swap => {
                     let (lhs, rhs) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         pop2(stack)?
                     };
-                    let stack = unsafe { &mut *stack_ptr };
+                    let stack = self.stack_mut();
                     push(stack, rhs)?;
                     push(stack, lhs)?;
                 }
@@ -1047,7 +1072,7 @@ impl<'a, 'b> Program<'a, 'b> {
                 Ops::Call => {
                     // Stack convention: ... args, arg_count, func_index
                     let (function_index, _arg_count, arg_start) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         let function_index =
                             usize::from(stack_word_to_program(pop(stack)?)?);
                         let arg_count = stack_word_to_usize(pop(stack)?)?;
@@ -1066,7 +1091,7 @@ impl<'a, 'b> Program<'a, 'b> {
                     // Insert return PC before the first argument for this call frame layout:
                     // [return_pc, saved_fp, arg0, arg1, ...]
                     {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack
                             .insert(arg_start, return_pc)
                             .map_err(|_| MachineError::StackOverflow)?;
@@ -1076,7 +1101,7 @@ impl<'a, 'b> Program<'a, 'b> {
                         .checked_add(1)
                         .ok_or(MachineError::StackOverflow)?;
                     {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack
                             .insert(saved_pointer_index, saved_frame_pointer)
                             .map_err(|_| MachineError::StackOverflow)?;
@@ -1100,7 +1125,7 @@ impl<'a, 'b> Program<'a, 'b> {
                 Ops::CallShared => {
                     // Stack convention: ... args, arg_count, shared_func_index
                     let (function_index, _arg_count, arg_start) = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         let function_index =
                             stack_word_to_program(pop(stack)?)?;
                         let arg_count = stack_word_to_usize(pop(stack)?)?;
@@ -1115,7 +1140,7 @@ impl<'a, 'b> Program<'a, 'b> {
                         .map_err(|_| MachineError::StackOverflow)?;
                     let return_pc = program_word_to_stack(return_pc);
                     {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack
                             .insert(arg_start, return_pc)
                             .map_err(|_| MachineError::StackOverflow)?;
@@ -1124,7 +1149,7 @@ impl<'a, 'b> Program<'a, 'b> {
                         .checked_add(1)
                         .ok_or(MachineError::StackOverflow)?;
                     {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack
                             .insert(saved_pointer_index, saved_frame_pointer)
                             .map_err(|_| MachineError::StackOverflow)?;
@@ -1156,20 +1181,20 @@ impl<'a, 'b> Program<'a, 'b> {
                         .ok_or(MachineError::StackUnderFlow)?;
                     // Fetch return PC and the caller's frame pointer from the frame header.
                     let return_pc = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         *stack
                             .get(return_pc_index)
                             .ok_or(MachineError::StackUnderFlow)?
                     };
                     let saved_frame_pointer = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         *stack
                             .get(saved_fp_index)
                             .ok_or(MachineError::StackUnderFlow)?
                     };
                     // Copy return values from the top of the stack before unwinding the frame.
                     let original_len = {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack.len()
                     };
                     let return_values_start = original_len
@@ -1184,13 +1209,13 @@ impl<'a, 'b> Program<'a, 'b> {
                             .checked_add(offset)
                             .ok_or(MachineError::StackOverflow)?;
                         let value = {
-                            let stack = unsafe { &mut *stack_ptr };
+                            let stack = self.stack_mut();
                             *stack
                                 .get(src_index)
                                 .ok_or(MachineError::StackUnderFlow)?
                         };
                         {
-                            let stack = unsafe { &mut *stack_ptr };
+                            let stack = self.stack_mut();
                             let slot = stack
                                 .get_mut(dest_index)
                                 .ok_or(MachineError::StackUnderFlow)?;
@@ -1203,7 +1228,7 @@ impl<'a, 'b> Program<'a, 'b> {
                             .checked_add(return_count)
                             .ok_or(MachineError::StackUnderFlow)?;
                     {
-                        let stack = unsafe { &mut *stack_ptr };
+                        let stack = self.stack_mut();
                         stack.truncate(new_len);
                     }
                     // Restore caller frame pointer and jump to saved return PC.

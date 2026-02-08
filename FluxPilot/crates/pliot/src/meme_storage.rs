@@ -36,7 +36,10 @@ impl<'a> Storage for MemStorage<'a> {
             .try_into()
             .map_err(|_| StorageError::new(StorageErrorKind::UiStateTooLarge))?;
         let target_index = if self.active_index == 0 { 1 } else { 0 };
-        let target = &self.programs[target_index];
+        let target = self
+            .programs
+            .get(target_index)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
         if size > target.len() {
             return Err(StorageError::new(StorageErrorKind::ProgramTooLarge));
         }
@@ -57,7 +60,11 @@ impl<'a> Storage for MemStorage<'a> {
         block_number: u32,
         block: &[ProgramWord],
     ) -> Result<(), StorageError> {
-        loader.add_block(self.programs[loader.target_index], block_number, block)
+        let program = self
+            .programs
+            .get_mut(loader.target_index)
+            .ok_or(StorageError::new(StorageErrorKind::ProgramTooLarge))?;
+        loader.add_block(program, block_number, block)
     }
 
     fn add_ui_block(
@@ -86,7 +93,11 @@ impl<'a> Storage for MemStorage<'a> {
             return Err(StorageError::new(StorageErrorKind::UnknownProgram));
         }
 
-        match Program::new(self.programs[self.active_index], memory) {
+        let program = self
+            .programs
+            .get_mut(self.active_index)
+            .ok_or(StorageError::new(StorageErrorKind::UnknownProgram))?;
+        match Program::new(program, memory) {
             Ok(v) => Ok(v),
             Err(e) => Err(StorageError::invalid_program(e)),
         }
@@ -114,10 +125,22 @@ impl<'a> Storage for MemStorage<'a> {
         if offset >= self.ui_state_len {
             return Ok(0);
         }
-        let remaining = self.ui_state_len - offset;
+        let remaining = self
+            .ui_state_len
+            .checked_sub(offset)
+            .ok_or(StorageError::new(StorageErrorKind::UiStateReadOutOfBounds))?;
         let to_copy = remaining.min(out.len());
-        let src = &self.ui_state[offset..offset + to_copy];
-        out[..to_copy].copy_from_slice(src);
+        let end = offset
+            .checked_add(to_copy)
+            .ok_or(StorageError::new(StorageErrorKind::UiStateReadOutOfBounds))?;
+        let src = self
+            .ui_state
+            .get(offset..end)
+            .ok_or(StorageError::new(StorageErrorKind::UiStateReadOutOfBounds))?;
+        let dest = out
+            .get_mut(..to_copy)
+            .ok_or(StorageError::new(StorageErrorKind::UiStateReadOutOfBounds))?;
+        dest.copy_from_slice(src);
         Ok(to_copy)
     }
 }
