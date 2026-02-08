@@ -19,7 +19,7 @@
  3. ~~Move to to u32 for stack instead of u16~~
  4. ~~Allow common functions in shared static to reduce duplcation across machines.~~
  5. ~~Combine stack and heap in to single allocation.~~
-    - fix the overuse of unsafe.
+    ~~- fix the overuse of unsafe.~~
  
 ## Phase 3
 
