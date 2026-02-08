@@ -21,13 +21,16 @@
  5. ~~Combine stack and heap in to single allocation.~~
     ~~- fix the overuse of unsafe.~~
  
-## Phase 3
+## Phase 3 (Implment i2c routing)
 
- 1. Implment i2c routing
+ 1. Work on desing
+ 2. Implemnt i2c in fermware.
+
 
 ## Phase 4
 
- 1. Implment LED configuration wizerd.
+ 1. Improuve sample machines.
+ 2. Implment LED configuration wizerd.
 
 ## Phase 5
  

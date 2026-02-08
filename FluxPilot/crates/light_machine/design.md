@@ -39,6 +39,18 @@ Shared function table entries point to program-scoped shared function entry poin
 See `FluxPilot/crates/light_machine/shared_functions_plan.md` for the detailed
 shared function semantics.
 
+## I2C Shared Function IDs
+
+When a program is intended to run with the firmware I2C integration, the
+program reserves shared function indices for I2C routing:
+
+- `0`: init program
+- `1`: get I2C routes
+- `2`: add I2C route
+- `3`: remove I2C route
+
+These indices are a program contract with the firmware and UI.
+
 ## Program graph emission
 
 Compilers may build a program graph of static data, functions, machine types,
