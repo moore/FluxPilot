@@ -27,6 +27,12 @@ const UI_BLOCK_SIZE: usize = 128;
 const ASM_MACHINE_MAX: usize = 256;
 const ASM_FUNCTION_MAX: usize = 256;
 const SHARED_FUNCTION_RESERVED_COUNT: u16 = 4;
+const I2C_MAPPING_GLOBALS_WORDS: u16 = 64;
+const I2C_DEFAULTS_BLOCK: &str = "i2c_defaults";
+const I2C_DEFAULT_LABEL_PREFIX: &str = "i2c_default_";
+const I2C_INIT_SHARED_FUNCTION_NAME: &str = "init_program";
+const I2C_INIT_SHARED_FUNCTION_INDEX: u16 = 0;
+const I2C_SHARED_GLOBAL_ANCHOR: &str = "__i2c_map_last__";
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>;
 
@@ -369,9 +375,11 @@ pub fn get_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptorJs, JsVal
 
 #[wasm_bindgen]
 pub fn compile_program(source: &str, buffer: &mut [u16]) -> Result<ProgramDescriptorJs, JsValue> {
-    let shared_function_count = count_shared_functions(source)?;
+    let injected_source = inject_i2c_init_program(source)?;
+    console_log(injected_source.as_str());
+    let shared_function_count = count_shared_functions(&injected_source)?;
     let mut assembler = GraphAssembler::new(shared_function_count);
-    for line in source.lines() {
+    for line in injected_source.lines() {
         assembler.add_line(line).map_err(assembler_error_to_js)?;
     }
     let graph = assembler.finish().map_err(assembler_error_to_js)?;
@@ -506,6 +514,139 @@ fn count_shared_functions(source: &str) -> Result<u16, JsValue> {
         .checked_add(1)
         .ok_or_else(|| JsValue::from_str("shared function count overflow"))?;
     Ok(count.max(SHARED_FUNCTION_RESERVED_COUNT))
+}
+
+fn inject_i2c_init_program(source: &str) -> Result<String, JsValue> {
+    if I2C_MAPPING_GLOBALS_WORDS == 0 {
+        return Ok(source.to_string());
+    }
+    if shared_function_index_defined(source, I2C_INIT_SHARED_FUNCTION_INDEX)? {
+        return Ok(source.to_string());
+    }
+    let has_defaults = has_shared_data_block(source, I2C_DEFAULTS_BLOCK);
+    let injection = build_i2c_injection(has_defaults)?;
+    Ok(insert_program_prelude(source, &injection))
+}
+
+fn shared_function_index_defined(source: &str, target_index: u16) -> Result<bool, JsValue> {
+    use std::collections::HashSet;
+    let mut used: HashSet<u16> = HashSet::new();
+    let mut next_auto: u16 = 0;
+    let mut has_shared = false;
+    for line in source.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if !line.starts_with(".shared_func") && !line.starts_with(".shared_func_decl") {
+            continue;
+        }
+        has_shared = true;
+        let mut tokens = line.split_whitespace();
+        let _ = tokens.next(); // directive
+        let _ = tokens.next(); // name
+        let mut index: Option<u16> = None;
+        if tokens.next() == Some("index") {
+            let token = tokens
+                .next()
+                .ok_or_else(|| JsValue::from_str("invalid shared function index"))?;
+            index = Some(
+                token
+                    .parse()
+                    .map_err(|_| JsValue::from_str("invalid shared function index"))?,
+            );
+        }
+        let assigned = if let Some(value) = index {
+            value
+        } else {
+            while used.contains(&next_auto) {
+                next_auto = next_auto
+                    .checked_add(1)
+                    .ok_or_else(|| JsValue::from_str("shared function count overflow"))?;
+            }
+            let value = next_auto;
+            next_auto = next_auto
+                .checked_add(1)
+                .ok_or_else(|| JsValue::from_str("shared function count overflow"))?;
+            value
+        };
+        used.insert(assigned);
+        if assigned == target_index {
+            return Ok(true);
+        }
+    }
+    Ok(has_shared && used.contains(&target_index))
+}
+
+fn has_shared_data_block(source: &str, block_name: &str) -> bool {
+    for line in source.lines() {
+        let line = line.split(';').next().unwrap_or("").trim();
+        if !line.starts_with(".shared_data") {
+            continue;
+        }
+        let mut tokens = line.split_whitespace();
+        let _ = tokens.next();
+        if tokens.next() == Some(block_name) {
+            return true;
+        }
+    }
+    false
+}
+
+fn build_i2c_injection(has_defaults: bool) -> Result<String, JsValue> {
+    let mut lines: StdVec<String> = StdVec::new();
+    let last_index = I2C_MAPPING_GLOBALS_WORDS
+        .checked_sub(1)
+        .ok_or_else(|| JsValue::from_str("invalid i2c mapping size"))?;
+    lines.push(format!(".shared {} {}", I2C_SHARED_GLOBAL_ANCHOR, last_index));
+    if !has_defaults {
+        lines.push(format!(".shared_data {}", I2C_DEFAULTS_BLOCK));
+        for index in 0..I2C_MAPPING_GLOBALS_WORDS {
+            lines.push(format!("    {}{}:", I2C_DEFAULT_LABEL_PREFIX, index));
+            lines.push("    .word 0".to_string());
+        }
+        lines.push(".end".to_string());
+    }
+    lines.push(format!(
+        ".shared_func {} index {}",
+        I2C_INIT_SHARED_FUNCTION_NAME, I2C_INIT_SHARED_FUNCTION_INDEX
+    ));
+    for index in 0..I2C_MAPPING_GLOBALS_WORDS {
+        lines.push(format!(
+            "    LOAD_STATIC {}{}",
+            I2C_DEFAULT_LABEL_PREFIX, index
+        ));
+        lines.push(format!("    GSTORE {}", index));
+    }
+    lines.push("    EXIT".to_string());
+    lines.push(".end".to_string());
+    Ok(lines.join("\n"))
+}
+
+fn insert_program_prelude(source: &str, injection: &str) -> String {
+    let mut lines: StdVec<&str> = source.lines().collect();
+    let mut insert_at = 0usize;
+    for (idx, line) in lines.iter().enumerate() {
+        let trimmed = line.split(';').next().unwrap_or("").trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with(".shared ") || trimmed.starts_with(".shared\t") {
+            insert_at = idx + 1;
+            continue;
+        }
+        break;
+    }
+    if insert_at >= lines.len() {
+        return format!("{}\n{}", source.trim_end(), injection);
+    }
+    let mut out = String::new();
+    for (idx, line) in lines.iter().enumerate() {
+        if idx == insert_at {
+            out.push_str(injection);
+            out.push('\n');
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 fn assembler_error_to_js(err: AssemblerError) -> JsValue {
