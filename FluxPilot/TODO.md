@@ -24,6 +24,8 @@
 ## Phase 3 (Implment i2c routing)
 
  1. Work on desing
+ 2. Remove access to local from shared functions so we don't need to set up
+    a machine.
  2. Implemnt i2c in fermware.
 
 

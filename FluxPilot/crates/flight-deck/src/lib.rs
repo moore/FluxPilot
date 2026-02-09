@@ -26,6 +26,7 @@ const PROGRAM_BLOCK_SIZE: usize = 64;
 const UI_BLOCK_SIZE: usize = 128;
 const ASM_MACHINE_MAX: usize = 256;
 const ASM_FUNCTION_MAX: usize = 256;
+const SHARED_FUNCTION_RESERVED_COUNT: u16 = 4;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>;
 
@@ -350,6 +351,8 @@ const fn message_type_name(message_type: &MessageType) -> &'static str {
         MessageType::Return => "Return",
         MessageType::Notifacation => "Notifacation",
         MessageType::Error => "Error",
+        MessageType::CallStaticFunction => "CallStaticFunction",
+        MessageType::StaticFunctionResult => "StaticFunctionResult",
         MessageType::LoadProgram => "LoadProgram",
         MessageType::ProgramBlock => "ProgramBlock",
         MessageType::UiStateBlock => "UiStateBlock",
@@ -395,11 +398,25 @@ fn build_test_program(buffer: &mut [u16]) -> Result<ProgramDescriptor<1, 2>, JsV
         buffer,
         MACHINE_COUNT as u16,
         MACHINE_COUNT as u16,
-        0,
+        SHARED_FUNCTION_RESERVED_COUNT,
     )
     .map_err(|_| JsValue::from_str("could not get machine builder"))?;
 
     let globals_size = 3;
+    let mut program_builder = program_builder;
+    for index in 0..SHARED_FUNCTION_RESERVED_COUNT {
+        let mut function = program_builder
+            .new_shared_function_at_index(FunctionIndex::new(index))
+            .map_err(|_| JsValue::from_str("could not get shared function builder"))?;
+        function
+            .add_op(Op::Exit)
+            .map_err(|_| JsValue::from_str("could not add op"))?;
+        let (_index, next_program) = function
+            .finish()
+            .map_err(|_| JsValue::from_str("could not finish shared function"))?;
+        program_builder = next_program;
+    }
+
     let machine = program_builder
         .new_machine(FUNCTION_COUNT as u16, globals_size)
         .map_err(|_| JsValue::from_str("could not get new machine"))?;
@@ -483,11 +500,12 @@ fn count_shared_functions(source: &str) -> Result<u16, JsValue> {
         }
     }
     if !has_shared {
-        return Ok(0);
+        return Ok(SHARED_FUNCTION_RESERVED_COUNT);
     }
-    max_index
+    let count = max_index
         .checked_add(1)
-        .ok_or_else(|| JsValue::from_str("shared function count overflow"))
+        .ok_or_else(|| JsValue::from_str("shared function count overflow"))?;
+    Ok(count.max(SHARED_FUNCTION_RESERVED_COUNT))
 }
 
 fn assembler_error_to_js(err: AssemblerError) -> JsValue {

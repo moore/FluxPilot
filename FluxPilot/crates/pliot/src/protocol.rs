@@ -32,6 +32,8 @@ pub enum MessageType {
     Return,
     Notifacation,
     Error,
+    CallStaticFunction,
+    StaticFunctionResult,
     LoadProgram,
     ProgramBlock,
     UiStateBlock,
@@ -119,6 +121,19 @@ pub enum Protocol<
         error_type: ErrorType,
         location: Option<ErrorLocation>,
     },
+    /// Call a shared static function by id.
+    CallStaticFunction {
+        request_id: RequestId,
+        function_id: u32,
+        args: Vec<StackWord, MAX_ARGS>,
+    },
+    /// Result of a shared static function call.
+    StaticFunctionResult {
+        request_id: RequestId,
+        function_id: u32,
+        result: Vec<StackWord, MAX_RESULT>,
+        error: Option<ErrorType>,
+    },
     /// Start new program load
     LoadProgram {
         request_id: RequestId,
@@ -162,6 +177,8 @@ impl<
             Protocol::Return { request_id, .. } => Some(*request_id),
             Protocol::Notifacation { .. } => None,
             Protocol::Error { request_id, .. } => *request_id,
+            Protocol::CallStaticFunction { request_id, .. } => Some(*request_id),
+            Protocol::StaticFunctionResult { request_id, .. } => Some(*request_id),
             Protocol::LoadProgram { request_id, .. } => Some(*request_id),
             Protocol::ProgramBlock { request_id, .. } => Some(*request_id),
             Protocol::UiStateBlock { request_id, .. } => Some(*request_id),
@@ -200,6 +217,19 @@ impl<
         Protocol::Call {
             request_id,
             function,
+            args,
+        }
+    }
+
+    pub fn call_static(
+        &mut self,
+        function_id: u32,
+        args: Vec<StackWord, MAX_ARGS>,
+    ) -> Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> {
+        let request_id = self.get_request_id();
+        Protocol::CallStaticFunction {
+            request_id,
+            function_id,
             args,
         }
     }

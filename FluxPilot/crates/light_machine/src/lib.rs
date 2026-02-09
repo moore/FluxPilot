@@ -704,6 +704,15 @@ impl<'a, 'b> Program<'a, 'b> {
         Ok(())
     }
 
+    pub fn call_shared(
+        &mut self,
+        function_number: ProgramWord,
+    ) -> Result<(), MachineError> {
+        let entry_point = self.get_shared_function_entry(function_number)?;
+        self.run(0, entry_point)?;
+        Ok(())
+    }
+
     fn run(
         &mut self,
         machine_number: ProgramWord,

@@ -22,8 +22,46 @@ const MAX_ARGS: usize = 3;
 const MAX_RESULT: usize = 3;
 const PROGRAM_BLOCK_SIZE: usize = 100;
 const UI_BLOCK_SIZE: usize = 128;
+const SHARED_FUNCTION_COUNT: u16 = 4;
 
 type ProtocolType = Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>;
+
+fn add_shared_stubs<const MACHINE_COUNT: usize, const FUNCTION_COUNT: usize>(
+    mut builder: ProgramBuilder<'_, MACHINE_COUNT, FUNCTION_COUNT>,
+) -> ProgramBuilder<'_, MACHINE_COUNT, FUNCTION_COUNT> {
+    for index in 0..SHARED_FUNCTION_COUNT {
+        let mut shared_function = builder
+            .new_shared_function_at_index(FunctionIndex::new(index))
+            .expect("could not get shared function builder");
+        shared_function
+            .add_op(Op::Exit)
+            .expect("could not add op");
+        let (_index, next_program) = shared_function
+            .finish()
+            .expect("could not finish shared function");
+        builder = next_program;
+    }
+    builder
+}
+
+fn add_shared_stubs_from<const MACHINE_COUNT: usize, const FUNCTION_COUNT: usize>(
+    mut builder: ProgramBuilder<'_, MACHINE_COUNT, FUNCTION_COUNT>,
+    start: u16,
+) -> ProgramBuilder<'_, MACHINE_COUNT, FUNCTION_COUNT> {
+    for index in start..SHARED_FUNCTION_COUNT {
+        let mut shared_function = builder
+            .new_shared_function_at_index(FunctionIndex::new(index))
+            .expect("could not get shared function builder");
+        shared_function
+            .add_op(Op::Exit)
+            .expect("could not add op");
+        let (_index, next_program) = shared_function
+            .finish()
+            .expect("could not finish shared function");
+        builder = next_program;
+    }
+    builder
+}
 
 fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> StdVec<String> {
     let source = format!(
@@ -143,16 +181,18 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
 
 #[test]
 fn test_pilot_get_color() -> Result<(), MachineError> {
-    let mut buffer = [0u16; 30];
+    let mut buffer = [0u16; 128];
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 3;
     let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
         MACHINE_COUNT as u16,
         MACHINE_COUNT as u16,
-        0,
+        SHARED_FUNCTION_COUNT,
     )
     .expect("could not get machine builder");
+
+    let program_builder = add_shared_stubs(program_builder);
 
     let globals_size = 3;
     let machine = program_builder
@@ -315,16 +355,16 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     const FUNCTION_COUNT: usize = 7;
     const LABEL_CAP: usize = 32;
     const DATA_CAP: usize = 32;
-    const STACK_CAP: usize = 32;
 
     let mut buffer = [0u16; 512];
     let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
         MACHINE_COUNT as ProgramWord,
         MACHINE_COUNT as ProgramWord,
-        0,
+        SHARED_FUNCTION_COUNT,
     )
     .unwrap();
+    let builder = add_shared_stubs(builder);
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
 
@@ -397,6 +437,96 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
 }
 
 #[test]
+fn test_call_static_function() -> Result<(), PliotError> {
+    const MACHINE_COUNT: usize = 1;
+    const FUNCTION_COUNT: usize = 1;
+
+    let mut buffer = [0u16; 256];
+    let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
+        &mut buffer,
+        MACHINE_COUNT as u16,
+        MACHINE_COUNT as u16,
+        SHARED_FUNCTION_COUNT,
+    )
+    .expect("could not get machine builder");
+
+    let mut shared_function = program_builder
+        .new_shared_function_at_index(FunctionIndex::new(0))
+        .expect("could not get shared function builder");
+    shared_function.add_op(Op::Push(11)).expect("could not add op");
+    shared_function.add_op(Op::Push(22)).expect("could not add op");
+    shared_function.add_op(Op::Exit).expect("could not add op");
+    let (_index, program_builder) = shared_function
+        .finish()
+        .expect("could not finish shared function");
+    let program_builder = add_shared_stubs_from(program_builder, 1);
+
+    let machine = program_builder
+        .new_machine(FUNCTION_COUNT as u16, 0)
+        .expect("could not get new machine");
+    let mut function = machine
+        .new_function()
+        .expect("could not get function builder");
+    function.add_op(Op::Exit).expect("could not add op");
+    let (_index, machine) = function.finish().expect("could not finish function");
+    let program_builder = machine.finish().expect("could not finish machine");
+
+    let descriptor = program_builder.finish_program();
+    let program = &buffer[0..descriptor.length];
+
+    let mut storage_buffer = [0u16; 256];
+    let mut ui_state = [0u8; 128];
+    let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state.as_mut_slice());
+
+    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
+        Controler::new();
+
+    let mut memory = [0u16; 256];
+    let memory = memory.as_mut_slice();
+    let mut pliot =
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory,
+        );
+
+    let ui_state: [u8; 0] = [];
+    let loader = controler.get_program_loader(program, &ui_state);
+    let mut out_buf = vec![0u8; 1024];
+
+    for message in loader {
+        let mut in_buf = to_vec_cobs::<ProtocolType, 2048>(&message).unwrap();
+        let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
+        assert_eq!(0, wrote);
+    }
+
+    let args = Vec::<StackWord, MAX_ARGS>::new();
+    let message = controler.call_static(0, args);
+    let mut in_buf = to_vec_cobs::<ProtocolType, 256>(&message).unwrap();
+    let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
+    assert_ne!(0, wrote);
+
+    let response: ProtocolType =
+        from_bytes_cobs(&mut out_buf[..wrote]).expect("could not read response");
+    match response {
+        Protocol::StaticFunctionResult {
+            request_id,
+            function_id,
+            result,
+            error,
+        } => {
+            assert_eq!(message.get_request_id(), Some(request_id));
+            assert_eq!(function_id, 0);
+            assert!(error.is_none());
+            assert_eq!(result.len(), 2);
+            assert_eq!((result[0] as u16, result[1] as u16), (11, 22));
+        }
+        _ => panic!("response was not StaticFunctionResult"),
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_read_ui_state_blocks() -> Result<(), PliotError> {
     const MACHINE_COUNT: usize = 1;
     const FUNCTION_COUNT: usize = 1;
@@ -408,9 +538,10 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
         &mut buffer,
         MACHINE_COUNT as ProgramWord,
         MACHINE_COUNT as ProgramWord,
-        0,
+        SHARED_FUNCTION_COUNT,
     )
     .unwrap();
+    let builder = add_shared_stubs(builder);
     let mut asm: Assembler<MACHINE_COUNT, FUNCTION_COUNT, LABEL_CAP, DATA_CAP> =
         Assembler::new(builder);
 

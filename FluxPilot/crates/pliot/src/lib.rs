@@ -30,6 +30,8 @@ use thiserror_no_std::Error;
 
 use crate::protocol::{MessageType, RequestId};
 
+const INIT_PROGRAM_FUNCTION_ID: ProgramWord = 0;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum StorageErrorKind {
     ProgramTooLarge,
@@ -222,6 +224,14 @@ impl<
         let progroam_unmber = ProgramNumber(0);
         let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
         let machine_count = program.machine_count()?;
+        if machine_count == 0 {
+            return Err(PliotError::MachineError(
+                MachineError::MachineIndexOutOfRange(0),
+            ));
+        }
+        program.stack_mut().clear();
+        program.call_shared(INIT_PROGRAM_FUNCTION_ID)?;
+        program.stack_mut().clear();
         for machine_index in 0..machine_count {
             program.stack_mut().clear();
             program.init_machine(machine_index)?;
@@ -282,6 +292,43 @@ impl<
                 // one day we'll want to make RCPs aginst the UI? For now return
                 // a error if we get an error :P
                 Self::write_unexpected_message_type(None, MessageType::Notifacation, out_buff)?
+            }
+
+            Protocol::CallStaticFunction {
+                request_id,
+                function_id,
+                args,
+            } => {
+                let result = self.call_static(function_id, &args);
+                let response = match result {
+                    Ok(result) => Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>::StaticFunctionResult {
+                        request_id,
+                        function_id,
+                        result,
+                        error: None,
+                    },
+                    Err(error) => {
+                        let error_type = Self::error_type_for_static_call(error, function_id);
+                        let empty: Vec<StackWord, MAX_RESULT> = Vec::new();
+                        Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>::StaticFunctionResult {
+                            request_id,
+                            function_id,
+                            result: empty,
+                            error: Some(error_type),
+                        }
+                    }
+                };
+
+                let wrote = postcard::to_slice_cobs(&response, out_buff)?;
+                wrote.len()
+            }
+
+            Protocol::StaticFunctionResult { request_id, .. } => {
+                Self::write_unexpected_message_type(
+                    Some(request_id),
+                    MessageType::StaticFunctionResult,
+                    out_buff,
+                )?
             }
 
             Protocol::LoadProgram {
@@ -504,6 +551,44 @@ impl<
        Ok(results)
     }
 
+    pub fn call_static(
+        &mut self,
+        function_id: u32,
+        args: &Vec<StackWord, MAX_ARGS>,
+    ) -> Result<Vec<StackWord, MAX_RESULT>, PliotError> {
+        let Ok(function_index) = ProgramWord::try_from(function_id) else {
+            return Err(PliotError::FunctionIndexOutOfRange);
+        };
+        let progroam_unmber = ProgramNumber(0);
+        let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
+        let machine_count = program.machine_count()?;
+        if machine_count == 0 {
+            return Err(PliotError::MachineError(
+                MachineError::MachineIndexOutOfRange(0),
+            ));
+        }
+
+        {
+            let stack = program.stack_mut();
+            stack.clear();
+            for arg in args {
+                stack.push(*arg)?;
+            }
+        }
+        program.call_shared(function_index)?;
+
+        if program.stack().len() > MAX_RESULT {
+            return Err(PliotError::ResultTooLarge);
+        }
+
+        let mut results: Vec<StackWord, MAX_RESULT> = Vec::new();
+        results
+            .extend_from_slice(program.stack().as_slice())
+            .map_err(|_| PliotError::ResultTooLarge)?;
+
+        Ok(results)
+    }
+
    pub fn get_led_color(
         &mut self,
         machine_number: ProgramWord,
@@ -579,6 +664,37 @@ impl<
             PliotError::FunctionIndexOutOfRange => (ErrorType::InvalidMessage, None),
             PliotError::OutBufToSmall => (ErrorType::InvalidMessage, None),
             PliotError::ResultTooLarge => (ErrorType::InvalidMessage, None),
+        }
+    }
+
+    fn error_type_for_static_call(error: PliotError, function_id: u32) -> ErrorType {
+        match error {
+            PliotError::StorageError(storage) => match storage.kind() {
+                StorageErrorKind::ProgramTooLarge => ErrorType::ProgramTooLarge,
+                StorageErrorKind::ProgramIncomplete => ErrorType::ProgramIncomplete,
+                StorageErrorKind::UnalignedWrite => ErrorType::UnalignedWrite,
+                StorageErrorKind::WriteFailed => ErrorType::WriteFailed,
+                StorageErrorKind::InvalidHeader => ErrorType::InvalidHeader,
+                StorageErrorKind::UnknownProgram => ErrorType::UnknownProgram,
+                StorageErrorKind::InvalidProgram => ErrorType::InvalidProgram,
+                StorageErrorKind::UnexpectedBlock => ErrorType::UnexpectedProgramBlock(0),
+                StorageErrorKind::UiStateTooLarge => ErrorType::UiStateTooLarge,
+                StorageErrorKind::UiStateIncomplete => ErrorType::UiStateIncomplete,
+                StorageErrorKind::UiStateReadOutOfBounds => ErrorType::UiStateReadOutOfBounds,
+            },
+            PliotError::MachineError(machine_error) => match machine_error {
+                MachineError::SharedFunctionIndexOutOfRange(_) => {
+                    ErrorType::UnknownFucntion(function_id)
+                }
+                MachineError::MachineIndexOutOfRange(index) => {
+                    ErrorType::UnknownMachine(index as u32)
+                }
+                _ => ErrorType::InvalidProgram,
+            },
+            PliotError::FunctionIndexOutOfRange => ErrorType::UnknownFucntion(function_id),
+            PliotError::ResultTooLarge => ErrorType::InvalidMessage,
+            PliotError::Postcard(_)
+            | PliotError::OutBufToSmall => ErrorType::InvalidMessage,
         }
     }
 }

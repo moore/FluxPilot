@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use light_machine::builder::{FunctionIndex, MachineBuilderError, ProgramBuilder};
+use light_machine::builder::{FunctionIndex, MachineBuilderError, Op, ProgramBuilder};
 use light_machine::{ProgramDescriptor, ProgramWord};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -280,15 +280,20 @@ impl ProgramGraph {
 
         let mut program = builder;
         for index in 0..self.shared_function_count {
+            let shared_function =
+                program.new_shared_function_at_index(FunctionIndex::new(index))?;
             if let Some(function) = self.shared_functions.get(&index) {
-                let shared_function =
-                    program.new_shared_function_at_index(FunctionIndex::new(index))?;
                 let shared_function = emit_shared_function(
                     shared_function,
                     function,
                     &static_addresses,
                     &shared_static_addresses,
                 )?;
+                let (_index, next_program) = shared_function.finish()?;
+                program = next_program;
+            } else {
+                let mut shared_function = shared_function;
+                shared_function.add_op(Op::Exit)?;
                 let (_index, next_program) = shared_function.finish()?;
                 program = next_program;
             }
