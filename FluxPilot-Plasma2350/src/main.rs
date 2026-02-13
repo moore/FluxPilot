@@ -12,6 +12,7 @@ use embassy_rp::bind_interrupts;
 use embassy_rp::peripherals;
 use embassy_rp::flash;
 use embassy_rp::gpio::{Level, Output};
+use embassy_rp::i2c;
 use embassy_rp::pio::Pio;
 use embassy_rp::pio_programs::ws2812::{Grb, PioWs2812, PioWs2812Program};
 use embassy_rp::usb;
@@ -51,6 +52,7 @@ pub static IMAGE_DEF: ImageDef = hal::block::ImageDef::secure_exe();
 bind_interrupts!(struct Irqs {
     USBCTRL_IRQ => usb::InterruptHandler<peripherals::USB>;
     PIO0_IRQ_0 => embassy_rp::pio::InterruptHandler<peripherals::PIO0>;
+    I2C0_IRQ => embassy_rp::i2c::InterruptHandler<peripherals::I2C0>;
 });
 
 const MAX_ARGS: usize = 3;
@@ -63,11 +65,22 @@ const NUM_LEDS: usize = 1024;
 const FRAME_TARGET_MS: u64 = 16;
 const PROGRAM_BUFFER_SIZE: usize = 1024;
 const USB_RECEIVE_BUF_SIZE: usize = 2048;
+const I2C_RECEIVE_BUF_SIZE: usize = 16;
+const I2C_SCAN_START: u8 = 0x08;
+const I2C_SCAN_END: u8 = 0x77;
+const I2C_MAX_DEVICES: usize = 16;
+const I2C_READ_LEN: usize = 16;
+const I2C_READ_INTERVAL_MS: u64 = 50;
 const WATCHDOG_RESET_THRESHOLD: u32 = 3;
 const WATCHDOG_PERIOD_MS: u64 = 2_000;
 const WATCHDOG_FEED_MS: u64 = 500;
 const RUNTIME_MEMORY_WORDS: usize = 4096; // 8 KiB total runtime memory (u16 words).
 const WATCHDOG_SCRATCH_MAGIC: u32 = u32::from_le_bytes(*b"WDT0");
+
+#[repr(align(4))]
+struct RuntimeMemory {
+    words: [u16; RUNTIME_MEMORY_WORDS],
+}
 
 type FlashDriver = flash::Flash<'static, peripherals::FLASH, flash::Blocking, FLASH_SIZE>;
 type StorageImpl = FlashStorage<FlashDriver>;
@@ -82,9 +95,10 @@ type SharedState = PliotShared<
 >;
 
 static PROGRAM_BUFFER: StaticCell<[u16; PROGRAM_BUFFER_SIZE]> = StaticCell::new();
-static RUNTIME_MEMORY: StaticCell<[u16; RUNTIME_MEMORY_WORDS]> = StaticCell::new();
+static RUNTIME_MEMORY: StaticCell<RuntimeMemory> = StaticCell::new();
 static FLASH_STORAGE: StaticCell<FlashStorage<FlashDriver>> = StaticCell::new();
 static USB_RECEIVE_BUF: StaticCell<[u8; USB_RECEIVE_BUF_SIZE]> = StaticCell::new();
+static I2C_RECEIVE_BUF: StaticCell<[u8; I2C_RECEIVE_BUF_SIZE]> = StaticCell::new();
 static RAW_MESSAGE_BUFF: StaticCell<Vec<u8, INCOMING_MESSAGE_CAP>> = StaticCell::new();
 static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
 static USB_BOS_DESCRIPTOR: StaticCell<[u8; 64]> = StaticCell::new();
@@ -132,16 +146,14 @@ async fn main(spawner: Spawner) -> ! {
         panic!("LED blue pin must be GPIO18 for heartbeat");
     }
     let onboard_blue = Output::new(p.PIN_18, Level::High);
-    
-    let data = LED_BUFFER.init([RGB8::default(); NUM_LEDS]);
-    boot_led_smoke(&mut led_driver, data).await;
 
+    let data = LED_BUFFER.init([RGB8::default(); NUM_LEDS]);
     let usb = p.USB;
     let driver = usb::Driver::new(usb, Irqs);
 
     //let mut config = embassy_usb::Config::new(0x2E8A, 0x000A);
     let mut config = embassy_usb::Config::new(0x4348, 0x55e0);
-    
+
     config.manufacturer = Some("Pimoroni");
     config.product = Some("Plasma 2350");
     config.serial_number = Some("plasma2350");
@@ -164,7 +176,9 @@ async fn main(spawner: Spawner) -> ! {
     let class = VendorClass::new(&mut builder, 64);
     let usb = builder.build();
 
-    let memory = RUNTIME_MEMORY.init([0u16; RUNTIME_MEMORY_WORDS]);
+    let memory = RUNTIME_MEMORY.init(RuntimeMemory {
+        words: [0u16; RUNTIME_MEMORY_WORDS],
+    });
     let program_buffer = PROGRAM_BUFFER.init([0u16; PROGRAM_BUFFER_SIZE]);
     let storage = {
         use pliot::StorageError;
@@ -204,22 +218,23 @@ async fn main(spawner: Spawner) -> ! {
         }
         FLASH_STORAGE.init(storage)
     };
-
     let shared = PLIOT_SHARED.init(Mutex::new(PliotShared {
-        pliot: Pliot::new(storage, memory.as_mut_slice()),
+        pliot: Pliot::new(storage, memory.words.as_mut_slice()),
     }));
+
     {
         let mut guard = shared.lock().await;
         let PliotShared { pliot } = &mut *guard;
-        if pliot.init().is_err() {
-            panic!("pliot init failed");
+        if let Err(err) = pliot.init() {
+            panic!("pliot init failed '{:?}'", err);
         }
     }
 
     let (usb_sender, usb_receiver) = class.split();
-    
+
     let _ = spawner.spawn(usb_device_task(usb));
     let _ = spawner.spawn(io_task(usb_receiver, usb_sender, shared));
+    let _ = spawner.spawn(i2c_task(p.I2C0, p.PIN_21, p.PIN_20));
     let _ = spawner.spawn(heartbeat_task(onboard_blue));
     let _ = spawner.spawn(watchdog_task(watchdog));
 
@@ -237,32 +252,7 @@ async fn main(spawner: Spawner) -> ! {
     .await;
 }
 
-async fn boot_led_smoke<P, const SM: usize, const NUM_LEDS: usize>(
-    writer: &mut PioWs2812<'static, P, SM, NUM_LEDS, Grb>,
-    data: &mut [RGB8; NUM_LEDS],
-) where
-    P: embassy_rp::pio::Instance,
-{
-    data.fill(RGB8::default());
-    set_debug_led(writer, data, 0, (16, 0, 0)).await;
-    Timer::after_millis(150).await;
 
-}
-
-async fn set_debug_led<P, const SM: usize, const NUM_LEDS: usize>(
-    writer: &mut PioWs2812<'static, P, SM, NUM_LEDS, Grb>,
-    data: &mut [RGB8; NUM_LEDS],
-    index: usize,
-    rgb: (u8, u8, u8)
-) where
-    P: embassy_rp::pio::Instance,
-{
-    if let Some(led) = data.get_mut(index) {
-        *led = rgb.into()
-    }
-    writer.write(data).await;
-    Timer::after_millis(150).await;
-}
 #[embassy_executor::task]
 async fn usb_device_task(
     mut usb: embassy_usb::UsbDevice<'static, usb::Driver<'static, peripherals::USB>>,
@@ -294,9 +284,63 @@ async fn io_task(
             USB_RECEIVE_BUF_SIZE,
             INCOMING_MESSAGE_CAP,
             OUTGOING_MESSAGE_CAP,
-        >(&mut receiver, &mut sender, shared, usb_buf, frame)
+        >(
+            &mut receiver,
+            &mut sender,
+            shared,
+            usb_buf,
+            frame,
+        )
         .await;
         USB_CONNECTED.store(false, Ordering::Relaxed);
+    }
+}
+
+#[embassy_executor::task]
+async fn i2c_task(
+    i2c: embassy_rp::Peri<'static, peripherals::I2C0>,
+    i2c_scl: embassy_rp::Peri<'static, peripherals::PIN_21>,
+    i2c_sda: embassy_rp::Peri<'static, peripherals::PIN_20>,
+) {
+    let mut i2c = i2c::I2c::new_async(
+        i2c,
+        i2c_scl,
+        i2c_sda,
+        Irqs,
+        i2c::Config::default(),
+    ); 
+
+    let i2c_buf = I2C_RECEIVE_BUF.init([0u8; I2C_RECEIVE_BUF_SIZE]);
+
+    let mut devices: Vec<u8, I2C_MAX_DEVICES> = Vec::new();
+    let probe = [0u8; 1];
+
+    for addr in I2C_SCAN_START..=I2C_SCAN_END {
+        if i2c.write_async(addr, probe).await.is_ok() {
+            if devices.push(addr).is_err() {
+                break;
+            }
+        }
+        Timer::after_millis(1).await;
+    }
+
+    loop {
+        if devices.is_empty() {
+            Timer::after_millis(I2C_READ_INTERVAL_MS).await;
+            continue;
+        }
+        let read_len = I2C_READ_LEN.min(I2C_RECEIVE_BUF_SIZE);
+        for idx in 0..devices.len() {
+            let addr = devices[idx];
+            if i2c
+                .read_async(addr, &mut i2c_buf[..read_len])
+                .await
+                .is_ok()
+            {
+                // TODO: decode and route I2C events.
+            }
+            Timer::after_millis(I2C_READ_INTERVAL_MS).await;
+        }
     }
 }
 
