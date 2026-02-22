@@ -30,6 +30,7 @@ use fluxpilot_firmware::program::default_program;
 use fluxpilot_firmware::usb_io::{io_loop, PliotShared};
 use fluxpilot_firmware::usb_vendor::{VendorClass, VendorReceiver, VendorSender};
 use fluxpilot_firmware::flash_storage::FlashStorage;
+use pliot::protocol::FunctionId;
 use pliot::Pliot;
 
 mod build_constants {
@@ -71,6 +72,11 @@ const I2C_SCAN_END: u8 = 0x77;
 const I2C_MAX_DEVICES: usize = 16;
 const I2C_READ_LEN: usize = 16;
 const I2C_READ_INTERVAL_MS: u64 = 50;
+const I2C_ROUTE_REFRESH_MS: u64 = 1_000;
+const I2C_ROUTE_BUS_ID: u8 = 0;
+const I2C_ROUTE_GET_ROUTES_FUNCTION_ID: u32 = 1;
+const I2C_ROUTE_MAX_ENTRIES: usize = 16;
+const I2C_ROUTE_MAX_TARGETS_PER_ENTRY: usize = 8;
 const WATCHDOG_RESET_THRESHOLD: u32 = 3;
 const WATCHDOG_PERIOD_MS: u64 = 2_000;
 const WATCHDOG_FEED_MS: u64 = 500;
@@ -106,6 +112,17 @@ static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
 static LED_BUFFER: StaticCell<[RGB8; NUM_LEDS]> = StaticCell::new();
 static PLIOT_SHARED: StaticCell<Mutex<CriticalSectionRawMutex, SharedState>> = StaticCell::new();
 static USB_CONNECTED: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone, Copy)]
+struct I2cRouteTarget {
+    machine_index: u16,
+    function_index: u32,
+}
+
+struct I2cRouteEntry {
+    address_7bit: u8,
+    targets: Vec<I2cRouteTarget, I2C_ROUTE_MAX_TARGETS_PER_ENTRY>,
+}
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) -> ! {
@@ -234,7 +251,7 @@ async fn main(spawner: Spawner) -> ! {
 
     let _ = spawner.spawn(usb_device_task(usb));
     let _ = spawner.spawn(io_task(usb_receiver, usb_sender, shared));
-    let _ = spawner.spawn(i2c_task(p.I2C0, p.PIN_21, p.PIN_20));
+    let _ = spawner.spawn(i2c_task(p.I2C0, p.PIN_21, p.PIN_20, shared));
     let _ = spawner.spawn(heartbeat_task(onboard_blue));
     let _ = spawner.spawn(watchdog_task(watchdog));
 
@@ -301,6 +318,7 @@ async fn i2c_task(
     i2c: embassy_rp::Peri<'static, peripherals::I2C0>,
     i2c_scl: embassy_rp::Peri<'static, peripherals::PIN_21>,
     i2c_sda: embassy_rp::Peri<'static, peripherals::PIN_20>,
+    shared: &'static Mutex<CriticalSectionRawMutex, SharedState>,
 ) {
     let mut i2c = i2c::I2c::new_async(
         i2c,
@@ -311,6 +329,7 @@ async fn i2c_task(
     ); 
 
     let i2c_buf = I2C_RECEIVE_BUF.init([0u8; I2C_RECEIVE_BUF_SIZE]);
+    let mut routes: Vec<I2cRouteEntry, I2C_ROUTE_MAX_ENTRIES> = Vec::new();
 
     let mut devices: Vec<u8, I2C_MAX_DEVICES> = Vec::new();
     let probe = [0u8; 1];
@@ -324,7 +343,15 @@ async fn i2c_task(
         Timer::after_millis(1).await;
     }
 
+    refresh_i2c_routes(shared, &mut routes).await;
+    let mut last_route_refresh = Instant::now();
+
     loop {
+        if last_route_refresh.elapsed() >= Duration::from_millis(I2C_ROUTE_REFRESH_MS) {
+            refresh_i2c_routes(shared, &mut routes).await;
+            last_route_refresh = Instant::now();
+        }
+
         if devices.is_empty() {
             Timer::after_millis(I2C_READ_INTERVAL_MS).await;
             continue;
@@ -337,11 +364,139 @@ async fn i2c_task(
                 .await
                 .is_ok()
             {
-                // TODO: decode and route I2C events.
+                let Some(route) = find_i2c_route(&routes, addr) else {
+                    Timer::after_millis(I2C_READ_INTERVAL_MS).await;
+                    continue;
+                };
+
+                let mut args: Vec<u32, MAX_ARGS> = Vec::new();
+                for &byte in &i2c_buf[..read_len] {
+                    if args.push(byte as u32).is_err() {
+                        break;
+                    }
+                }
+
+                let mut guard = shared.lock().await;
+                let PliotShared { pliot } = &mut *guard;
+                for target in route.targets.iter() {
+                    let function = FunctionId {
+                        machine_index: target.machine_index,
+                        function_index: target.function_index,
+                    };
+                    let _ = pliot.call(function, &args);
+                }
             }
             Timer::after_millis(I2C_READ_INTERVAL_MS).await;
         }
     }
+}
+
+async fn refresh_i2c_routes(
+    shared: &'static Mutex<CriticalSectionRawMutex, SharedState>,
+    routes: &mut Vec<I2cRouteEntry, I2C_ROUTE_MAX_ENTRIES>,
+) {
+    let route_words = {
+        let mut guard = shared.lock().await;
+        let PliotShared { pliot } = &mut *guard;
+        let args: Vec<u32, MAX_ARGS> = Vec::new();
+        match pliot.call_static(I2C_ROUTE_GET_ROUTES_FUNCTION_ID, &args) {
+            Ok(words) => words,
+            Err(_) => {
+                routes.clear();
+                return;
+            }
+        }
+    };
+
+    if !parse_i2c_routes(route_words.as_slice(), routes) {
+        routes.clear();
+    }
+}
+
+fn parse_i2c_routes(
+    words: &[u32],
+    routes: &mut Vec<I2cRouteEntry, I2C_ROUTE_MAX_ENTRIES>,
+) -> bool {
+    routes.clear();
+    let Some(&entry_count_word) = words.first() else {
+        return true;
+    };
+    let Ok(entry_count) = usize::try_from(entry_count_word) else {
+        return false;
+    };
+
+    let mut cursor = 1usize;
+    for _ in 0..entry_count {
+        let Some(&bus_word) = words.get(cursor) else {
+            return false;
+        };
+        cursor += 1;
+        let Some(&address_word) = words.get(cursor) else {
+            return false;
+        };
+        cursor += 1;
+        let Some(&target_count_word) = words.get(cursor) else {
+            return false;
+        };
+        cursor += 1;
+
+        let Ok(bus_id) = u8::try_from(bus_word) else {
+            return false;
+        };
+        let Ok(address_7bit) = u8::try_from(address_word) else {
+            return false;
+        };
+        let Ok(target_count) = usize::try_from(target_count_word) else {
+            return false;
+        };
+
+        let mut targets: Vec<I2cRouteTarget, I2C_ROUTE_MAX_TARGETS_PER_ENTRY> = Vec::new();
+        for _ in 0..target_count {
+            let Some(&machine_word) = words.get(cursor) else {
+                return false;
+            };
+            cursor += 1;
+            let Some(&function_word) = words.get(cursor) else {
+                return false;
+            };
+            cursor += 1;
+
+            if bus_id == I2C_ROUTE_BUS_ID {
+                let Ok(machine_index) = u16::try_from(machine_word) else {
+                    return false;
+                };
+                if targets
+                    .push(I2cRouteTarget {
+                        machine_index,
+                        function_index: function_word,
+                    })
+                    .is_err()
+                {
+                    return false;
+                }
+            }
+        }
+
+        if bus_id == I2C_ROUTE_BUS_ID
+            && routes
+                .push(I2cRouteEntry {
+                    address_7bit,
+                    targets,
+                })
+                .is_err()
+        {
+            return false;
+        }
+    }
+
+    cursor == words.len()
+}
+
+fn find_i2c_route<'a>(
+    routes: &'a Vec<I2cRouteEntry, I2C_ROUTE_MAX_ENTRIES>,
+    address_7bit: u8,
+) -> Option<&'a I2cRouteEntry> {
+    routes.iter().find(|entry| entry.address_7bit == address_7bit)
 }
 
 fn write_default_program(
