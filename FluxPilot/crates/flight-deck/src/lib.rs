@@ -94,6 +94,14 @@ extern "C" {
         block_number: u32,
         block: &[u8],
     );
+
+    #[wasm_bindgen(method, js_name = onI2cDevices)]
+    pub fn on_i2c_devices(
+        this: &ReceiveHandler,
+        request_id: u64,
+        total_count: u32,
+        devices: &[u8],
+    );
 }
 
 
@@ -255,6 +263,17 @@ impl FlightDeck {
                     block.as_slice(),
                 );
             }
+            Protocol::I2cDevices {
+                request_id,
+                total_count,
+                devices,
+            } => {
+                handler.on_i2c_devices(
+                    request_id.value(),
+                    total_count,
+                    devices.as_slice(),
+                );
+            }
             _ => {
             }
         }
@@ -285,6 +304,15 @@ impl FlightDeck {
 
     pub fn read_ui_state_block(&mut self, block_number: u32) -> Result<Option<u64>, FlightDeckError> {
         let message = self.controler.read_ui_state(block_number);
+        let message_buf = to_vec_cobs::<ProtocolType, 512>(&message)
+            .map_err(|_| FlightDeckError::CouldNotEncode)?;
+        send(message_buf.as_slice());
+        let request_id = message.get_request_id().map(|id| id.value());
+        Ok(request_id)
+    }
+
+    pub fn get_i2c_devices(&mut self, offset: u32) -> Result<Option<u64>, FlightDeckError> {
+        let message = self.controler.get_i2c_devices(offset);
         let message_buf = to_vec_cobs::<ProtocolType, 512>(&message)
             .map_err(|_| FlightDeckError::CouldNotEncode)?;
         send(message_buf.as_slice());
@@ -357,6 +385,8 @@ const fn message_type_name(message_type: &MessageType) -> &'static str {
         MessageType::Return => "Return",
         MessageType::Notifacation => "Notifacation",
         MessageType::Error => "Error",
+        MessageType::GetI2cDevices => "GetI2cDevices",
+        MessageType::I2cDevices => "I2cDevices",
         MessageType::CallStaticFunction => "CallStaticFunction",
         MessageType::StaticFunctionResult => "StaticFunctionResult",
         MessageType::LoadProgram => "LoadProgram",

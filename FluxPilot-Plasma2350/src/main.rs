@@ -342,6 +342,11 @@ async fn i2c_task(
         }
         Timer::after_millis(1).await;
     }
+    {
+        let mut guard = shared.lock().await;
+        let PliotShared { pliot } = &mut *guard;
+        pliot.set_i2c_devices(devices.as_slice());
+    }
 
     refresh_i2c_routes(shared, &mut routes).await;
     let mut last_route_refresh = Instant::now();

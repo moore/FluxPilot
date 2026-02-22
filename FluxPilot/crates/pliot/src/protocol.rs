@@ -32,6 +32,8 @@ pub enum MessageType {
     Return,
     Notifacation,
     Error,
+    GetI2cDevices,
+    I2cDevices,
     CallStaticFunction,
     StaticFunctionResult,
     LoadProgram,
@@ -121,6 +123,17 @@ pub enum Protocol<
         error_type: ErrorType,
         location: Option<ErrorLocation>,
     },
+    /// Request discovered I2C devices starting at `offset`.
+    GetI2cDevices {
+        request_id: RequestId,
+        offset: u32,
+    },
+    /// A page of discovered I2C devices.
+    I2cDevices {
+        request_id: RequestId,
+        total_count: u32,
+        devices: Vec<u8, MAX_RESULT>,
+    },
     /// Call a shared static function by id.
     CallStaticFunction {
         request_id: RequestId,
@@ -177,6 +190,8 @@ impl<
             Protocol::Return { request_id, .. } => Some(*request_id),
             Protocol::Notifacation { .. } => None,
             Protocol::Error { request_id, .. } => *request_id,
+            Protocol::GetI2cDevices { request_id, .. } => Some(*request_id),
+            Protocol::I2cDevices { request_id, .. } => Some(*request_id),
             Protocol::CallStaticFunction { request_id, .. } => Some(*request_id),
             Protocol::StaticFunctionResult { request_id, .. } => Some(*request_id),
             Protocol::LoadProgram { request_id, .. } => Some(*request_id),
@@ -231,6 +246,17 @@ impl<
             request_id,
             function_id,
             args,
+        }
+    }
+
+    pub fn get_i2c_devices(
+        &mut self,
+        offset: u32,
+    ) -> Protocol<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> {
+        let request_id = self.get_request_id();
+        Protocol::GetI2cDevices {
+            request_id,
+            offset,
         }
     }
 

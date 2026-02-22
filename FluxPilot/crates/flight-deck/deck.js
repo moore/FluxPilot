@@ -27,6 +27,7 @@ let connectInFlight = false;
 let uiStateFetch = null;
 let pendingUiStateBytes = null;
 let incomingFrame = [];
+let i2cDeviceFetch = null;
 
 function clampWord(value) {
     const numberValue = Number(value);
@@ -346,6 +347,34 @@ class DeckReceiveHandler {
             scheduleNextUiStateBlock();
         }
     }
+
+    onI2cDevices(requestId, totalCount, devices) {
+        const page = Array.from(devices);
+        if (!i2cDeviceFetch) {
+            i2cDeviceFetch = {
+                totalCount,
+                nextOffset: 0,
+                devices: [],
+            };
+        }
+        i2cDeviceFetch.totalCount = totalCount;
+        i2cDeviceFetch.devices.push(...page);
+        i2cDeviceFetch.nextOffset = i2cDeviceFetch.devices.length;
+
+        console.log("I2C devices page", {
+            requestId,
+            totalCount,
+            page,
+            collected: [...i2cDeviceFetch.devices],
+        });
+
+        if (i2cDeviceFetch.nextOffset < totalCount && page.length > 0) {
+            requestI2cDevicesPage(i2cDeviceFetch.nextOffset);
+            return;
+        }
+
+        console.log("I2C devices discovered", [...i2cDeviceFetch.devices]);
+    }
 }
 
 const receiveHandler = new DeckReceiveHandler();
@@ -560,11 +589,33 @@ function disableControls() {
 function handleDisconnect(message) {
     writer = null;
     uiStateFetch = null;
+    i2cDeviceFetch = null;
     setConnectionState(false);
     disableControls();
     if (message) {
         setStatus(message);
     }
+}
+
+function requestI2cDevicesPage(offset) {
+    const deck = globalThis[DECK_KEY];
+    if (!deck) {
+        return;
+    }
+    try {
+        deck.get_i2c_devices(offset);
+    } catch (err) {
+        console.error("get_i2c_devices failed:", err);
+    }
+}
+
+function startI2cDeviceFetch() {
+    i2cDeviceFetch = {
+        totalCount: null,
+        nextOffset: 0,
+        devices: [],
+    };
+    requestI2cDevicesPage(0);
 }
 
 function resolvePending(requestId) {
@@ -718,6 +769,7 @@ async function connectUsbDevice(device) {
         setConnectionState(true);
         setStatus('Connected via WebUSB.');
         startUiStateFetch();
+        startI2cDeviceFetch();
     } finally {
         connectInFlight = false;
     }

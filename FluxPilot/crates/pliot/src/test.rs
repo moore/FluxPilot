@@ -1,6 +1,6 @@
 use crate::{
     meme_storage::MemStorage,
-    protocol::{Controler, FunctionId},
+    protocol::{Controler, ErrorType, FunctionId, MessageType, RequestId},
 };
 
 use super::*;
@@ -612,6 +612,89 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
             assert!(block.is_empty());
         }
         _ => panic!("response was not UiStateBlock"),
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_get_i2c_devices_message() -> Result<(), PliotError> {
+    let mut storage_buffer = [0u16; 128];
+    let mut ui_state = [0u8; 128];
+    let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state.as_mut_slice());
+    let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
+        Controler::new();
+    let mut memory = [0u16; 128];
+    let mut pliot =
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory.as_mut_slice(),
+        );
+    pliot.set_i2c_devices(&[0x10, 0x22, 0x30]);
+
+    let message = controler.get_i2c_devices(1);
+    let mut in_buf = to_vec_cobs::<ProtocolType, 256>(&message).unwrap();
+    let mut out_buf = [0u8; 256];
+    let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
+    assert_ne!(0, wrote);
+
+    let response: ProtocolType = from_bytes_cobs(&mut out_buf[..wrote]).unwrap();
+    match response {
+        Protocol::I2cDevices {
+            request_id,
+            total_count,
+            devices,
+        } => {
+            assert_eq!(message.get_request_id(), Some(request_id));
+            assert_eq!(total_count, 3);
+            assert_eq!(devices.as_slice(), &[0x22, 0x30]);
+        }
+        _ => panic!("response was not I2cDevices"),
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_i2c_devices_message_is_unexpected_inbound() -> Result<(), PliotError> {
+    let mut storage_buffer = [0u16; 128];
+    let mut ui_state = [0u8; 128];
+    let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state.as_mut_slice());
+    let mut memory = [0u16; 128];
+    let mut pliot =
+        Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
+            &mut storage,
+            memory.as_mut_slice(),
+        );
+
+    let mut devices: Vec<u8, MAX_RESULT> = Vec::new();
+    devices.push(0x10).unwrap();
+    let mut in_buf = to_vec_cobs::<ProtocolType, 256>(&Protocol::I2cDevices {
+        request_id: RequestId::new(7),
+        total_count: 1,
+        devices,
+    })
+    .unwrap();
+    let mut out_buf = [0u8; 256];
+    let wrote = pliot.process_message(&mut in_buf[..], out_buf.as_mut_slice())?;
+    assert_ne!(0, wrote);
+
+    let response: ProtocolType = from_bytes_cobs(&mut out_buf[..wrote]).unwrap();
+    match response {
+        Protocol::Error {
+            request_id,
+            error_type,
+            ..
+        } => {
+            assert_eq!(request_id, Some(RequestId::new(7)));
+            match error_type {
+                ErrorType::UnexpectedMessageType(message_type) => {
+                    assert!(matches!(message_type, MessageType::I2cDevices));
+                }
+                _ => panic!("unexpected error type"),
+            }
+        }
+        _ => panic!("response was not Error"),
     }
 
     Ok(())

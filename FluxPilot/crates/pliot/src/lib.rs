@@ -31,6 +31,7 @@ use thiserror_no_std::Error;
 use crate::protocol::{MessageType, RequestId};
 
 const INIT_PROGRAM_FUNCTION_ID: ProgramWord = 0;
+const I2C_DEVICE_LIST_CAP: usize = 16;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum StorageErrorKind {
@@ -200,6 +201,7 @@ pub struct Pliot<
     storage: &'a mut S,
     memory: &'b mut [ProgramWord],
     loader: Option<CurrentLoader<S>>,
+    i2c_devices: Vec<u8, I2C_DEVICE_LIST_CAP>,
 }
 
 impl<
@@ -217,6 +219,7 @@ impl<
             storage,
             memory,
             loader: None,
+            i2c_devices: Vec::new(),
         }
     }
 
@@ -243,6 +246,19 @@ impl<
         let progroam_unmber = ProgramNumber(0);
         let program = self.storage.get_program(progroam_unmber, self.memory)?;
         Ok(program.machine_count()?)
+    }
+
+    pub fn set_i2c_devices(&mut self, devices: &[u8]) {
+        self.i2c_devices.clear();
+        for &device in devices {
+            if self.i2c_devices.push(device).is_err() {
+                break;
+            }
+        }
+    }
+
+    pub fn i2c_devices(&self) -> &[u8] {
+        self.i2c_devices.as_slice()
     }
 
 
@@ -278,6 +294,35 @@ impl<
                 // one day we'll want to make RCPs aginst the UI? For now return
                 // a error if we get an error :P
                 Self::write_unexpected_message_type(request_id, MessageType::Error, out_buff)?
+            }
+
+            Protocol::GetI2cDevices { request_id, offset } => {
+                let offset = usize::try_from(offset).unwrap_or(usize::MAX);
+                let total_count = self.i2c_devices.len() as u32;
+                let mut devices: Vec<u8, MAX_RESULT> = Vec::new();
+                if offset < self.i2c_devices.len() {
+                    for &device in &self.i2c_devices.as_slice()[offset..] {
+                        if devices.push(device).is_err() {
+                            break;
+                        }
+                    }
+                }
+
+                let response = Protocol::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE>::I2cDevices {
+                    request_id,
+                    total_count,
+                    devices,
+                };
+                let wrote = postcard::to_slice_cobs(&response, out_buff)?;
+                wrote.len()
+            }
+
+            Protocol::I2cDevices { request_id, .. } => {
+                Self::write_unexpected_message_type(
+                    Some(request_id),
+                    MessageType::I2cDevices,
+                    out_buff,
+                )?
             }
 
             Protocol::Return { request_id, .. } => {
