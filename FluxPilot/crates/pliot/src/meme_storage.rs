@@ -1,4 +1,5 @@
 use crate::{Program, ProgramNumber, Storage, StorageError, StorageErrorKind, ProgramWord};
+use light_machine::StackWord;
 
 pub struct MemStorage<'a> {
     programs: [&'a mut [ProgramWord]; 2],
@@ -87,7 +88,7 @@ impl<'a> Storage for MemStorage<'a> {
     fn get_program<'b, 'c>(
         &'b mut self,
         program_number: ProgramNumber,
-        memory: &'c mut [ProgramWord],
+        memory: &'c mut [StackWord],
     ) -> Result<Program<'b, 'c>, StorageError> {
         if program_number.0 != 0 {
             return Err(StorageError::new(StorageErrorKind::UnknownProgram));

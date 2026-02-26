@@ -19,7 +19,7 @@
 )]
 #![cfg_attr(not(test), warn(clippy::missing_panics_doc))]
 
-use core::mem::{align_of, size_of};
+use core::mem::size_of;
 use heapless::Vec;
 use thiserror_no_std::Error;
 
@@ -31,16 +31,14 @@ pub mod assembler;
 #[cfg(test)]
 mod assembler_test;
 /// This module implments the vitural machine for FluxPilot.
-/// A machine takes three memory regions when it is initilized:
+/// A machine takes two memory regions when it is initilized:
 /// `
 ///     static_data: &'a [ProgramWord],
-///     globals: &'b mut [ProgramWord],
-///     program: &'c [ProgramWord],
+///     memory: &'b mut [StackWord],
 /// `
-/// The `static_data` is used to hold any constancs that the machine
-/// program needs. The `globals`` holds any mutibal state that needs
-/// to persist betweeen calls in to the machine. The `program` holds
-/// instructions and valued used in the evalution of the machine program.
+/// The `static_data` is used to hold the program image (header, tables,
+/// instructions, immediates, and static values). The front of `memory` holds
+/// globals and the tail holds the runtime stack.
 ///
 /// The `static_data`` and `program` may hold data assocated with more
 /// that one machine to fisilitate sharing of data and opperations between
@@ -59,25 +57,22 @@ pub type ProgramWord = u16;
 pub type StackWord = u32;
 
 struct ProgramMemory<'a> {
-    globals: &'a mut [ProgramWord],
+    globals: &'a mut [StackWord],
     stack: StackSlice<'a>,
 }
 
 impl<'a> ProgramMemory<'a> {
-    fn split(
-        memory: &'a mut [ProgramWord],
-        globals_size: ProgramWord,
-    ) -> Result<Self, MachineError> {
-        let stack_bottom = stack_bottom_for_globals(globals_size);
+    fn split(memory: &'a mut [StackWord], globals_size: ProgramWord) -> Result<Self, MachineError> {
+        let globals_len = usize::from(globals_size);
         let memory_len = memory.len();
-        if memory_len < stack_bottom {
+        if memory_len < globals_len {
             return Err(MachineError::MemoryBufferTooSmall {
-                needed: stack_bottom,
+                needed: globals_len,
                 provided: memory_len,
             });
         }
-        let (globals, stack_words) = memory.split_at_mut(stack_bottom);
-        let stack = StackSlice::from_program_words(stack_words)?;
+        let (globals, stack_words) = memory.split_at_mut(globals_len);
+        let stack = StackSlice::from_stack_words(stack_words);
         Ok(Self { globals, stack })
     }
 }
@@ -88,26 +83,11 @@ pub struct StackSlice<'a> {
 }
 
 impl<'a> StackSlice<'a> {
-    fn from_program_words(words: &'a mut [ProgramWord]) -> Result<Self, MachineError> {
-        const {
-            assert!(size_of::<StackWord>().is_multiple_of(size_of::<ProgramWord>()));
+    fn from_stack_words(words: &'a mut [StackWord]) -> Self {
+        Self {
+            data: words,
+            len: 0,
         }
-        let stack_ratio = size_of::<StackWord>()
-            .checked_div(size_of::<ProgramWord>())
-            .ok_or(MachineError::StackMemoryMisaligned)?;
-        let ptr = words.as_mut_ptr();
-        let ptr_addr = ptr as usize;
-        if !ptr_addr.is_multiple_of(align_of::<StackWord>()) {
-            return Err(MachineError::StackMemoryMisaligned);
-        }
-        let stack_len = words
-            .len()
-            .checked_div(stack_ratio)
-            .ok_or(MachineError::StackMemoryMisaligned)?;
-        let stack_ptr = ptr as *mut StackWord;
-        // SAFETY: caller ensures alignment; length is computed from input slice.
-        let stack = unsafe { core::slice::from_raw_parts_mut(stack_ptr, stack_len) };
-        Ok(Self { data: stack, len: 0 })
     }
 
     pub fn len(&self) -> usize {
@@ -215,25 +195,6 @@ impl core::ops::IndexMut<usize> for StackSlice<'_> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let len = self.len;
         &mut self.data[..len][index]
-    }
-}
-
-fn stack_bottom_for_globals(globals_size: ProgramWord) -> usize {
-    let globals_size = usize::from(globals_size);
-    let stack_ratio = size_of::<StackWord>()
-        .checked_div(size_of::<ProgramWord>())
-        .unwrap_or(1);
-    if stack_ratio == 0 {
-        return globals_size;
-    }
-    let rem = globals_size
-        .checked_rem(stack_ratio)
-        .unwrap_or(0);
-    if rem == 0 {
-        globals_size
-    } else {
-        let bump = stack_ratio.saturating_sub(rem);
-        globals_size.saturating_add(bump)
     }
 }
 
@@ -375,8 +336,6 @@ pub enum MachineError {
     InvalidProgramVersion(ProgramWord),
     #[error("memory buffer too small (needed {needed}, provided {provided})")]
     MemoryBufferTooSmall { needed: usize, provided: usize },
-    #[error("stack memory is not aligned for StackWord")]
-    StackMemoryMisaligned,
 }
 
 pub const PROGRAM_VERSION: ProgramWord = 2;
@@ -467,7 +426,7 @@ impl<const MACHINE_COUNT_MAX: usize, const FUNCTION_COUNT_MAX: usize> Default
 
 pub struct Program<'a, 'b> {
     static_data: &'a [ProgramWord],
-    globals: &'b mut [ProgramWord],
+    globals: &'b mut [StackWord],
     stack: StackSlice<'b>,
     frame_pointer: StackWord,
     locals_base: ProgramWord,
@@ -476,7 +435,7 @@ pub struct Program<'a, 'b> {
 impl<'a, 'b> Program<'a, 'b> {
     pub fn new(
         static_data: &'a [ProgramWord],
-        memory: &'b mut [ProgramWord],
+        memory: &'b mut [StackWord],
     ) -> Result<Self, MachineError> {
         let Some(version) = static_data.get(VERSION_OFFSET) else {
             return Err(MachineError::OutOfBoudsStaticRead(VERSION_OFFSET));
@@ -939,7 +898,7 @@ impl<'a, 'b> Program<'a, 'b> {
 
                     let word = read_global(index, self.globals)?;
                     let stack = self.stack_mut();
-                    push(stack, program_word_to_stack(word))?;
+                    push(stack, word)?;
                 }
                 Ops::LocalStore => {
                     pc = next_pc(pc)?;
@@ -957,15 +916,14 @@ impl<'a, 'b> Program<'a, 'b> {
 
                     let word = {
                         let stack = self.stack_mut();
-                        stack_word_to_program(pop(stack)?)?
+                        pop(stack)?
                     };
 
-                    set_value(
-                        self.globals,
-                        index,
-                        word,
-                        MachineError::OutOfBoundsGlobalsAccess(index),
-                    )?;
+                    let slot = self
+                        .globals
+                        .get_mut(index)
+                        .ok_or(MachineError::OutOfBoundsGlobalsAccess(index))?;
+                    *slot = word;
                 }
                 Ops::GlobalLoad => {
                     pc = next_pc(pc)?;
@@ -979,7 +937,7 @@ impl<'a, 'b> Program<'a, 'b> {
 
                     let word = read_global(index, self.globals)?;
                     let stack = self.stack_mut();
-                    push(stack, program_word_to_stack(word))?;
+                    push(stack, word)?;
                 }
                 Ops::GlobalStore => {
                     pc = next_pc(pc)?;
@@ -991,15 +949,14 @@ impl<'a, 'b> Program<'a, 'b> {
 
                     let word = {
                         let stack = self.stack_mut();
-                        stack_word_to_program(pop(stack)?)?
+                        pop(stack)?
                     };
 
-                    set_value(
-                        self.globals,
-                        index,
-                        word,
-                        MachineError::OutOfBoundsGlobalsAccess(index),
-                    )?;
+                    let slot = self
+                        .globals
+                        .get_mut(index)
+                        .ok_or(MachineError::OutOfBoundsGlobalsAccess(index))?;
+                    *slot = word;
                 }
                 Ops::LoadStatic => {
                     let addr = {
@@ -1265,7 +1222,7 @@ fn read_static(index: usize, program: &[ProgramWord]) -> Result<ProgramWord, Mac
     }
 }
 
-fn read_global(index: usize, globals: &[ProgramWord]) -> Result<ProgramWord, MachineError> {
+fn read_global(index: usize, globals: &[StackWord]) -> Result<StackWord, MachineError> {
     match globals.get(index) {
         None => Err(MachineError::OutOfBoundsGlobalsAccess(index)),
         Some(word) => Ok(*word),

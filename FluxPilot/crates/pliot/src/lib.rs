@@ -164,7 +164,7 @@ pub trait Storage {
     fn get_program<'a, 'b>(
         &'a mut self,
         program_number: ProgramNumber,
-        memory: &'b mut [ProgramWord],
+        memory: &'b mut [StackWord],
     ) -> Result<Program<'a, 'b>, StorageError>;
     fn get_ui_state_len(&mut self, program_number: ProgramNumber) -> Result<u32, StorageError>;
     fn read_ui_state_block(
@@ -199,7 +199,7 @@ pub struct Pliot<
     S: Storage,
 > {
     storage: &'a mut S,
-    memory: &'b mut [ProgramWord],
+    memory: &'b mut [StackWord],
     loader: Option<CurrentLoader<S>>,
     i2c_devices: Vec<u8, I2C_DEVICE_LIST_CAP>,
 }
@@ -214,7 +214,7 @@ impl<
     S: Storage,
 > Pliot<'a, 'b, MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, S>
 {
-    pub fn new<'c: 'a, 'd: 'b>(storage: &'a mut S, memory: &'b mut [ProgramWord]) -> Self {
+    pub fn new<'c: 'a, 'd: 'b>(storage: &'a mut S, memory: &'b mut [StackWord]) -> Self {
         Self {
             storage,
             memory,

@@ -25,6 +25,7 @@ use heapless::Vec;
 use static_cell::StaticCell;
 use core::sync::atomic::{AtomicBool, Ordering};
 use smart_leds::RGB8;
+use light_machine::StackWord;
 
 use fluxpilot_firmware::program::default_program;
 use fluxpilot_firmware::usb_io::{io_loop, PliotShared};
@@ -80,12 +81,12 @@ const I2C_ROUTE_MAX_TARGETS_PER_ENTRY: usize = 8;
 const WATCHDOG_RESET_THRESHOLD: u32 = 3;
 const WATCHDOG_PERIOD_MS: u64 = 2_000;
 const WATCHDOG_FEED_MS: u64 = 500;
-const RUNTIME_MEMORY_WORDS: usize = 4096; // 8 KiB total runtime memory (u16 words).
+const RUNTIME_MEMORY_WORDS: usize = 4096; // 16 KiB total runtime memory (StackWord cells).
 const WATCHDOG_SCRATCH_MAGIC: u32 = u32::from_le_bytes(*b"WDT0");
 
 #[repr(align(4))]
 struct RuntimeMemory {
-    words: [u16; RUNTIME_MEMORY_WORDS],
+    words: [StackWord; RUNTIME_MEMORY_WORDS],
 }
 
 type FlashDriver = flash::Flash<'static, peripherals::FLASH, flash::Blocking, FLASH_SIZE>;
@@ -194,7 +195,7 @@ async fn main(spawner: Spawner) -> ! {
     let usb = builder.build();
 
     let memory = RUNTIME_MEMORY.init(RuntimeMemory {
-        words: [0u16; RUNTIME_MEMORY_WORDS],
+        words: [0u32; RUNTIME_MEMORY_WORDS],
     });
     let program_buffer = PROGRAM_BUFFER.init([0u16; PROGRAM_BUFFER_SIZE]);
     let storage = {

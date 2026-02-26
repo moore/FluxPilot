@@ -1,6 +1,6 @@
 //! Flash-backed storage for Pliot programs using embedded-storage flash traits.
 use embedded_storage::nor_flash::{NorFlash, NorFlashError, NorFlashErrorKind};
-use light_machine::{Program, ProgramWord};
+use light_machine::{Program, ProgramWord, StackWord};
 use pliot::{ProgramNumber, Storage, StorageError, StorageErrorKind};
 
 const WORD_SIZE_BYTES: usize = 2;
@@ -746,7 +746,7 @@ impl<F: NorFlash> Storage for FlashStorage<F> {
     fn get_program<'a, 'b>(
         &'a mut self,
         program_number: ProgramNumber,
-        memory: &'b mut [ProgramWord],
+        memory: &'b mut [StackWord],
     ) -> Result<Program<'a, 'b>, StorageError> {
         if program_number.value() != 0 {
             return Err(StorageError::new(StorageErrorKind::UnknownProgram));

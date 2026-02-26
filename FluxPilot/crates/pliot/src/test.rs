@@ -238,7 +238,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut memory = [0u16; 128];
+    let mut memory = [0u32; 128];
     let memory = memory.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
@@ -392,7 +392,7 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut memory = [0u16; 256];
+    let mut memory = [0u32; 256];
     let memory = memory.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
@@ -481,7 +481,7 @@ fn test_call_static_function() -> Result<(), PliotError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut memory = [0u16; 256];
+    let mut memory = [0u32; 256];
     let memory = memory.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
@@ -565,7 +565,7 @@ fn test_read_ui_state_blocks() -> Result<(), PliotError> {
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
 
-    let mut memory = [0u16; 128];
+    let mut memory = [0u32; 128];
     let memory = memory.as_mut_slice();
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
@@ -624,7 +624,7 @@ fn test_get_i2c_devices_message() -> Result<(), PliotError> {
     let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state.as_mut_slice());
     let mut controler: Controler<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE> =
         Controler::new();
-    let mut memory = [0u16; 128];
+    let mut memory = [0u32; 128];
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
             &mut storage,
@@ -660,7 +660,7 @@ fn test_i2c_devices_message_is_unexpected_inbound() -> Result<(), PliotError> {
     let mut storage_buffer = [0u16; 128];
     let mut ui_state = [0u8; 128];
     let mut storage = MemStorage::new(storage_buffer.as_mut_slice(), ui_state.as_mut_slice());
-    let mut memory = [0u16; 128];
+    let mut memory = [0u32; 128];
     let mut pliot =
         Pliot::<MAX_ARGS, MAX_RESULT, PROGRAM_BLOCK_SIZE, UI_BLOCK_SIZE, MemStorage>::new(
             &mut storage,

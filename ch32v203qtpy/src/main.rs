@@ -38,7 +38,7 @@ use {ch32_hal as hal, panic_halt as _};
 
 use crate::ws2812::Ws2812;
 use smart_leds::{SmartLedsWrite, RGB8};
-use light_machine::{ProgramWord, StackWord};
+use light_machine::StackWord;
 use ws2812_spi as ws2812;
 
 use fluxpilot_firmware::led::led_loop;
@@ -76,10 +76,8 @@ const PROGRAM_BUFFER_SIZE: usize = 1024;
 const UI_STATE_BUFFER_SIZE: usize = 1024;
 const USB_RECEIVE_BUF_SIZE: usize = 265; // BUG: I don't know the correct size
 const STACK_SIZE: usize = 100;
-const STACK_WORDS_PER_STACKWORD: usize =
-    core::mem::size_of::<StackWord>() / core::mem::size_of::<ProgramWord>();
 const GLOBALS_SIZE: usize = 10;
-const RUNTIME_MEMORY_WORDS: usize = GLOBALS_SIZE + STACK_SIZE * STACK_WORDS_PER_STACKWORD;
+const RUNTIME_MEMORY_WORDS: usize = GLOBALS_SIZE + STACK_SIZE;
 #[cfg(feature = "storage-flash")]
 const FLASH_BASE: usize = 0x0000_0000;
 #[cfg(all(feature = "storage-mem", feature = "storage-flash"))]
@@ -89,7 +87,7 @@ compile_error!("Enable exactly one of `storage-mem` or `storage-flash` features.
 
 static PROGRAM_BUFFER: StaticCell<[u16; PROGRAM_BUFFER_SIZE]> = StaticCell::new();
 static UI_STATE_BUFFER: StaticCell<[u8; UI_STATE_BUFFER_SIZE]> = StaticCell::new();
-static RUNTIME_MEMORY: StaticCell<[u16; RUNTIME_MEMORY_WORDS]> = StaticCell::new();
+static RUNTIME_MEMORY: StaticCell<[StackWord; RUNTIME_MEMORY_WORDS]> = StaticCell::new();
 #[cfg(feature = "storage-mem")]
 static MEM_STORAGE: StaticCell<MemStorage<'static>> = StaticCell::new();
 #[cfg(feature = "storage-flash")]
@@ -221,7 +219,7 @@ async fn main(spawner: Spawner) -> () {
     let usb = builder.build();
 
     /////////////////////////////////////////////////
-    let memory = RUNTIME_MEMORY.init([0u16; RUNTIME_MEMORY_WORDS]);
+    let memory = RUNTIME_MEMORY.init([0u32; RUNTIME_MEMORY_WORDS]);
     #[cfg(feature = "storage-mem")]
     let storage = {
         let program_buffer = PROGRAM_BUFFER.init([0u16; PROGRAM_BUFFER_SIZE]);
