@@ -300,8 +300,8 @@ impl<
                 let offset = usize::try_from(offset).unwrap_or(usize::MAX);
                 let total_count = self.i2c_devices.len() as u32;
                 let mut devices: Vec<u8, MAX_RESULT> = Vec::new();
-                if offset < self.i2c_devices.len() {
-                    for &device in &self.i2c_devices.as_slice()[offset..] {
+                if let Some(available) = self.i2c_devices.as_slice().get(offset..) {
+                    for &device in available {
                         if devices.push(device).is_err() {
                             break;
                         }
@@ -634,11 +634,22 @@ impl<
         Ok(results)
     }
 
-   pub fn get_led_color(
+    pub fn start_frame(
+        &mut self,
+        machine_number: ProgramWord,
+        tick: u32,
+    ) -> Result<(), PliotError> {
+        let progroam_unmber = ProgramNumber(0);
+        let mut program = self.storage.get_program(progroam_unmber, self.memory)?;
+        program.stack_mut().clear();
+        program.start_frame(machine_number, tick)?;
+        Ok(())
+    }
+
+    pub fn get_led_color(
         &mut self,
         machine_number: ProgramWord,
         index: u16,
-        tick: u32,
         seed: (u8, u8, u8),
     ) -> Result<(u8, u8, u8), PliotError> {
         let progroam_unmber = ProgramNumber(0);
@@ -650,7 +661,7 @@ impl<
             stack.push(seed.1 as StackWord)?;
             stack.push(seed.2 as StackWord)?;
         }
-        let result = program.get_led_color(machine_number, index, tick)?;
+        let result = program.get_led_color(machine_number, index)?;
         Ok(result)
     }
 

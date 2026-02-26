@@ -66,13 +66,14 @@ fn add_shared_stubs_from<const MACHINE_COUNT: usize, const FUNCTION_COUNT: usize
 fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> StdVec<String> {
     let source = format!(
         "
-.machine {} locals 6 functions 7
+.machine {} locals 7 functions 8
     .local red 0
     .local green 1
     .local blue 2
     .local speed 3
     .local brightness 4
     .local led_count 5
+    .local frame_tick 6
     .data control_statics
     init_red:
     .word {}
@@ -101,32 +102,39 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         LSTORE brightness
         LOAD_STATIC init_led_count
         LSTORE led_count
+        PUSH 0
+        LSTORE frame_tick
         EXIT
     .end
 
-    .func set_rgb index 2
+    .func start_frame index 1
+        LSTORE frame_tick
+        EXIT
+    .end
+
+    .func set_rgb index 3
         LSTORE blue
         LSTORE green
         LSTORE red
         EXIT
     .end
 
-    .func set_brightness index 3
+    .func set_brightness index 4
         LSTORE brightness
         EXIT
     .end
 
-    .func set_speed index 4
+    .func set_speed index 5
         LSTORE speed
         EXIT
     .end
 
-    .func set_led_count index 6
+    .func set_led_count index 7
         LSTORE led_count
         EXIT
     .end
 
-    .func get_rgb_worker index 5
+    .func get_rgb_worker index 6
         .frame sred 0
         .frame sgreen 1
         .frame sblue 2
@@ -164,7 +172,8 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         RET 3
     .end
 
-    .func get_rgb index 1
+    .func get_rgb index 2
+        LLOAD frame_tick
         PUSH 5
         CALL get_rgb_worker
         EXIT
@@ -183,7 +192,7 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
 fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut buffer = [0u16; 128];
     const MACHINE_COUNT: usize = 1;
-    const FUNCTION_COUNT: usize = 3;
+    const FUNCTION_COUNT: usize = 4;
     let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
         MACHINE_COUNT as u16,
@@ -202,6 +211,13 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
     let mut function = machine
         .new_function()
         .expect("could not get fucntion builder");
+    function.add_op(Op::Exit).expect("could not add op");
+    let (_, machine) = function.finish().expect("Could not finish function");
+
+    let mut function = machine
+        .new_function()
+        .expect("could not get fucntion builder");
+    function.add_op(Op::Pop).expect("could not add op");
     function.add_op(Op::Exit).expect("could not add op");
     let (_, machine) = function.finish().expect("Could not finish function");
 
@@ -271,7 +287,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         args.push(StackWord::from(blue)).unwrap();
 
         let type_id = descriptor.instances[0].type_id as usize;
-        let store_function_index = descriptor.types[type_id].functions[2].clone();
+        let store_function_index = descriptor.types[type_id].functions[3].clone();
         let function = FunctionId {
             machine_index: 0,
             function_index: store_function_index.into(),
@@ -308,7 +324,7 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
         let args = Vec::<StackWord, MAX_ARGS>::new();
 
         let type_id = descriptor.instances[0].type_id as usize;
-        let get_function_index = descriptor.types[type_id].functions[1].clone();
+        let get_function_index = descriptor.types[type_id].functions[2].clone();
         let function = FunctionId {
             machine_index: 0,
             function_index: get_function_index.into(),
@@ -352,11 +368,11 @@ fn test_pilot_get_color() -> Result<(), MachineError> {
 #[test]
 fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     const MACHINE_COUNT: usize = 4;
-    const FUNCTION_COUNT: usize = 7;
+    const FUNCTION_COUNT: usize = 8;
     const LABEL_CAP: usize = 32;
     const DATA_CAP: usize = 32;
 
-    let mut buffer = [0u16; 512];
+    let mut buffer = [0u16; 768];
     let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
         MACHINE_COUNT as ProgramWord,
@@ -414,8 +430,8 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     assert_eq!(machine_count, MACHINE_COUNT as ProgramWord);
 
     for (machine_index, init) in init_values.iter().enumerate() {
-        let (r, g, b) =
-            pliot.get_led_color(machine_index as ProgramWord, 0, 0u32, (0, 0, 0))?;
+        pliot.start_frame(machine_index as ProgramWord, 0u32)?;
+        let (r, g, b) = pliot.get_led_color(machine_index as ProgramWord, 0, (0, 0, 0))?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -426,9 +442,12 @@ fn test_pilot_four_simple_crawlers_in_one_program() -> Result<(), PliotError> {
     }
 
     for i in 8000..8100 {
+        for machine_index in 0..machine_count {
+            pliot.start_frame(machine_index, i as u32)?;
+        }
         for j in 0..256 {
             for machine_index in 0..machine_count {
-                pliot.get_led_color(machine_index, j, i as u32, (0, 0, 0))?;
+                pliot.get_led_color(machine_index, j, (0, 0, 0))?;
             }
         }
     }

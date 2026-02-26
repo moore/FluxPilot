@@ -279,11 +279,12 @@ if (typeof globalThis !== "undefined") {
   globalThis.__restoreUiState = restoreUiState;
 }
 export const CRAWLER_MACHINE = `
-.machine main locals 4 functions 5
+.machine main locals 5 functions 6
     .local red 0
     .local green 1
     .local blue 2
     .local brightness 3
+    .local frame_tick 4
 
     .func init index 0
       PUSH 0
@@ -294,22 +295,29 @@ export const CRAWLER_MACHINE = `
       LSTORE blue
       PUSH 10
       LSTORE brightness
+      PUSH 0
+      LSTORE frame_tick
       EXIT
     .end
 
-    .func set_rgb index 2
+    .func start_frame index 1
+      LSTORE frame_tick
+      EXIT
+    .end
+
+    .func set_rgb index 3
       LSTORE blue
       LSTORE green
       LSTORE red
       EXIT
     .end
 
-    .func set_brightness index 3
+    .func set_brightness index 4
       LSTORE brightness
       EXIT
     .end
 
-    .func get_rgb_worker index 4
+    .func get_rgb_worker index 5
       .frame sred 0
       .frame sgreen 1
       .frame sblue 2
@@ -371,7 +379,8 @@ export const CRAWLER_MACHINE = `
       RET 3
     .end
 
-    .func get_rgb index 1
+    .func get_rgb index 2
+      LLOAD frame_tick
       PUSH 5
       CALL get_rgb_worker
       EXIT
@@ -380,13 +389,14 @@ export const CRAWLER_MACHINE = `
 `;
 
 export const SIMPLE_CRAWLER_MACHINE = `
-.machine main locals 6 functions 7
+.machine main locals 7 functions 8
     .local red 0
     .local green 1
     .local blue 2
     .local speed 3
     .local brightness 4
     .local led_count 5
+    .local frame_tick 6
 
     .func init index 0
       LOAD_STATIC init_red
@@ -401,32 +411,39 @@ export const SIMPLE_CRAWLER_MACHINE = `
       LSTORE brightness
       LOAD_STATIC init_led_count
       LSTORE led_count
+      PUSH 0
+      LSTORE frame_tick
       EXIT
     .end
 
-    .func set_rgb index 2
+    .func start_frame index 1
+      LSTORE frame_tick
+      EXIT
+    .end
+
+    .func set_rgb index 3
       LSTORE blue
       LSTORE green
       LSTORE red
       EXIT
     .end
 
-    .func set_brightness index 3
+    .func set_brightness index 4
       LSTORE brightness
       EXIT
     .end
 
-    .func set_speed index 4
+    .func set_speed index 5
       LSTORE speed
       EXIT
     .end
 
-    .func set_led_count index 6
+    .func set_led_count index 7
       LSTORE led_count
       EXIT
     .end
 
-    .func get_rgb_worker index 5
+    .func get_rgb_worker index 6
       .frame sred 0
       .frame sgreen 1
       .frame sblue 2
@@ -464,7 +481,8 @@ export const SIMPLE_CRAWLER_MACHINE = `
       RET 3
     .end
 
-    .func get_rgb index 1
+    .func get_rgb index 2
+      LLOAD frame_tick
       PUSH 5
       CALL get_rgb_worker
       EXIT
@@ -478,11 +496,12 @@ export const SIMPLE_CRAWLER_MACHINE = `
 
 
 export const PULSE_MACHINE = `
-.machine main locals 4 functions 4
+.machine main locals 5 functions 5
     .local red 0
     .local green 1
     .local blue 2
     .local brightness 3
+    .local frame_tick 4
 
     .func init index 0
       LOAD_STATIC init_red
@@ -493,29 +512,35 @@ export const PULSE_MACHINE = `
       LSTORE blue
       PUSH 10
       LSTORE brightness
+      PUSH 0
+      LSTORE frame_tick
       EXIT
     .end
 
-    .func set_rgb index 2
+    .func start_frame index 1
+      LSTORE frame_tick
+      EXIT
+    .end
+
+    .func set_rgb index 3
       LSTORE blue
       LSTORE green
       LSTORE red
       EXIT
     .end
 
-    .func set_brightness index 3
+    .func set_brightness index 4
       LSTORE brightness
       EXIT
     .end
 
-    .func get_rgb index 1 ; Stack [index, tick]
+    .func get_rgb index 2 ; Stack [seed_r, seed_g, seed_b, index]
       .frame sred 0
       .frame sgreen 1
       .frame sblue 2
       .frame led_index 3
-      .frame ticks 4
       SLOAD led_index
-      SLOAD ticks
+      LLOAD frame_tick
       DUP
       PUSH 120
       MOD
@@ -565,7 +590,7 @@ export const DEFAULT_MACHINE_RACK = [
       new MachineControlDescriptor({
         id: "speed",
         label: "Speed",
-        functionId: 4,
+        functionId: 5,
         type: "range",
         min: 10,
         max: 1000,
@@ -576,7 +601,7 @@ export const DEFAULT_MACHINE_RACK = [
       new MachineControlDescriptor({
         id: "brigntness",
         label: "Brightness",
-        functionId: 3,
+        functionId: 4,
         type: "range",
         min: 10,
         max: 100,
@@ -587,7 +612,7 @@ export const DEFAULT_MACHINE_RACK = [
       new MachineControlDescriptor({
         id: "ledcount",
         label: "Led Count",
-        functionId: 6,
+        functionId: 7,
         type: "range",
         min: 1,
         max: 1024,
@@ -598,7 +623,7 @@ export const DEFAULT_MACHINE_RACK = [
       new MachineControlDescriptor({
         id: "rainbow",
         label: "Pick Color",
-        functionId: 2,
+        functionId: 3,
         type: "color_picker",
         defaultValue: "#468bc0ff",
         locals: ["red", "green", "blue"],
@@ -613,7 +638,7 @@ export const DEFAULT_MACHINE_RACK = [
       new MachineControlDescriptor({
         id: "rainbow",
         label: "Pick Color",
-        functionId: 2,
+        functionId: 3,
         type: "color_picker",
         defaultValue: "#468bc0ff",
         locals: ["red", "green", "blue"],

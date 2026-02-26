@@ -151,9 +151,15 @@ pub(crate) fn debug_mark(color: RGB8) {
             return;
         }
         let data = &mut *DEBUG_DATA;
-        data[DEBUG_STEP] = color;
-        let _ = (*DEBUG_WS).write(data.clone());
-        DEBUG_STEP += 1;
+        let Some(slot) = data.get_mut(DEBUG_STEP) else {
+            return;
+        };
+        *slot = color;
+        let _ = (*DEBUG_WS).write(*data);
+        DEBUG_STEP = match DEBUG_STEP.checked_add(1) {
+            Some(next) => next,
+            None => NUM_LEDS,
+        };
     }
 }
 

@@ -350,7 +350,8 @@ pub const SHARED_FUNCTION_TABLE_OFFSET: usize = TYPE_TABLE_OFFSET + 1;
 pub const HEADER_WORDS: usize = SHARED_FUNCTION_TABLE_OFFSET + 1;
 
 const INIT_OFFSET: usize = 0;
-const GET_COLOR_OFFSET: usize = INIT_OFFSET + 1;
+const START_FRAME_OFFSET: usize = INIT_OFFSET + 1;
+const GET_COLOR_OFFSET: usize = START_FRAME_OFFSET + 1;
 
 #[derive(Debug)]
 pub struct MachineTypeDescriptor<const FUNCTION_COUNT_MAX: usize> {
@@ -617,18 +618,26 @@ impl<'a, 'b> Program<'a, 'b> {
         Ok(())
     }
 
+    pub fn start_frame(
+        &mut self,
+        machine_number: ProgramWord,
+        tick: u32,
+    ) -> Result<(), MachineError> {
+        self.stack_mut().push(StackWord::from(tick))?;
+        let entry_point = self.get_function_entry(machine_number, START_FRAME_OFFSET)?;
+        self.run(machine_number, entry_point)?;
+        Ok(())
+    }
+
     pub fn get_led_color(
         &mut self,
         machine_number: ProgramWord,
         index: u16,
-        tick: u32,
     ) -> Result<(u8, u8, u8), MachineError> {
         if self.stack().len() < 3 {
             return Err(MachineError::TwoFewArguments);
         }
         self.stack_mut().push(StackWord::from(index))?;
-        self.stack_mut().push(StackWord::from(tick))?;
-
 
         let entry_point = self.get_function_entry(machine_number, GET_COLOR_OFFSET)?;
         self.run(machine_number, entry_point)?;

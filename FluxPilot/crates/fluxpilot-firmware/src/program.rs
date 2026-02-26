@@ -4,7 +4,7 @@ use light_machine::builder::{FunctionIndex, MachineBuilderError, Op, ProgramBuil
 #[inline(never)]
 pub fn default_program(buffer: &mut [u16]) -> Result<usize, MachineBuilderError> {
     const MACHINE_COUNT: usize = 1;
-    const FUNCTION_COUNT: usize = 3;
+    const FUNCTION_COUNT: usize = 4;
     const SHARED_FUNCTION_COUNT: u16 = 4;
     let program_builder = ProgramBuilder::<'_, MACHINE_COUNT, FUNCTION_COUNT>::new(
         buffer,
@@ -31,6 +31,11 @@ pub fn default_program(buffer: &mut [u16]) -> Result<usize, MachineBuilderError>
     function.add_op(Op::LocalStore(1))?;
     function.add_op(Op::Push(8))?;
     function.add_op(Op::LocalStore(2))?;
+    function.add_op(Op::Exit)?;
+    let (_function_index, machine) = function.finish()?;
+
+    let mut function = machine.new_function()?;
+    function.add_op(Op::Pop)?;
     function.add_op(Op::Exit)?;
     let (_function_index, machine) = function.finish()?;
 

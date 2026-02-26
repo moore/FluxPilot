@@ -250,13 +250,14 @@ fn test_min_stack_capacity_overflow() -> Result<(), MachineError> {
 fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> StdVec<String> {
     let source = format!(
         "
-.machine {} locals 6 functions 7
+.machine {} locals 7 functions 8
     .local red 0
     .local green 1
     .local blue 2
     .local speed 3
     .local brightness 4
     .local led_count 5
+    .local frame_tick 6
     .data control_statics
     init_red:
     .word {}
@@ -285,32 +286,39 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         LSTORE brightness
         LOAD_STATIC init_led_count
         LSTORE led_count
+        PUSH 0
+        LSTORE frame_tick
         EXIT
     .end
 
-    .func set_rgb index 2
+    .func start_frame index 1
+        LSTORE frame_tick
+        EXIT
+    .end
+
+    .func set_rgb index 3
         LSTORE blue
         LSTORE green
         LSTORE red
         EXIT
     .end
 
-    .func set_brightness index 3
+    .func set_brightness index 4
         LSTORE brightness
         EXIT
     .end
 
-    .func set_speed index 4
+    .func set_speed index 5
         LSTORE speed
         EXIT
     .end
 
-    .func set_led_count index 6
+    .func set_led_count index 7
         LSTORE led_count
         EXIT
     .end
 
-    .func get_rgb_worker index 5
+    .func get_rgb_worker index 6
         .frame sred 0
         .frame sgreen 1
         .frame sblue 2
@@ -348,7 +356,8 @@ fn build_simple_crawler_machine_lines(name: &str, init: [ProgramWord; 6]) -> Std
         RET 3
     .end
 
-    .func get_rgb index 1
+    .func get_rgb index 2
+        LLOAD frame_tick
         PUSH 5
         CALL get_rgb_worker
         EXIT
@@ -403,11 +412,11 @@ fn test_locals_are_machine_scoped() -> Result<(), MachineError> {
 #[test]
 fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     const MACHINE_COUNT: usize = 4;
-    const FUNCTION_COUNT: usize = 7;
+    const FUNCTION_COUNT: usize = 8;
     const LABEL_CAP: usize = 32;
     const DATA_CAP: usize = 32;
 
-    let mut buffer = [0u16; 512];
+    let mut buffer = [0u16; 768];
     let builder = ProgramBuilder::<MACHINE_COUNT, FUNCTION_COUNT>::new(
         &mut buffer,
         MACHINE_COUNT as ProgramWord,
@@ -451,6 +460,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     }
 
     for (machine_index, init) in init_values.iter().enumerate() {
+        program.start_frame(machine_index as ProgramWord, 0)?;
         {
             let stack = program.stack_mut();
             stack.clear();
@@ -459,7 +469,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
             stack.push(0)?;
         }
         let (r, g, b) =
-            program.get_led_color(machine_index as ProgramWord, 0, 0u32)?;
+            program.get_led_color(machine_index as ProgramWord, 0)?;
         let expected_r = (init[0] * init[4]) / 100;
         let expected_g = (init[1] * init[4]) / 100;
         let expected_b = (init[2] * init[4]) / 100;
@@ -470,6 +480,9 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
     }
 
     for i in  8000..8100 {
+        for machine_index in 0..machine_count {
+            program.start_frame(machine_index as ProgramWord, i as u32)?;
+        }
         for j in 0..256 {
             for machine_index in 0..machine_count {
                 {
@@ -479,7 +492,7 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
                     stack.push(0)?;
                     stack.push(0)?;
                 }
-                program.get_led_color(machine_index as ProgramWord, j as u16, i as u32)?;
+                program.get_led_color(machine_index as ProgramWord, j as u16)?;
             
             }
         }
@@ -492,14 +505,18 @@ fn test_four_simple_crawlers_in_one_program() -> Result<(), MachineError> {
 #[test]
 fn test_init_get_color() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main locals 3 functions 2",
+        ".machine main locals 3 functions 3",
         ".func set_rgb index 0",
         "LSTORE 2",
         "LSTORE 1",
         "LSTORE 0",
         "EXIT",
         ".end",
-        ".func get_rgb index 1",
+        ".func start_frame index 1",
+        "POP",
+        "EXIT",
+        ".end",
+        ".func get_rgb index 2",
         "LLOAD 0",
         "LLOAD 1",
         "LLOAD 2",
@@ -531,16 +548,16 @@ fn test_init_get_color() -> Result<(), MachineError> {
         stack.push(0)?;
     }
     let (r, g, b) = program
-        .get_led_color(0, 31337, 17u32)
+        .get_led_color(0, 31337)
         .expect("Could not get led color");
 
     println!("stack is {:?}", program.stack().as_slice());
     assert_eq!((r as u16, g as u16, b as u16), (red, green, blue));
 
     let stack = program.stack();
-    assert_eq!(stack.len(), 5);
+    assert_eq!(stack.len(), 4);
     assert_eq!((stack[0], stack[1], stack[2]), (0, 0, 0));
-    assert_eq!((stack[3], stack[4]), (31337, 17));
+    assert_eq!(stack[3], 31337);
     Ok(())
 }
 
@@ -548,15 +565,22 @@ fn test_init_get_color() -> Result<(), MachineError> {
 #[test]
 fn test_init_get_color2() -> Result<(), MachineError> {
     let program = assemble_program(&[
-        ".machine main locals 3 functions 2",
+        ".machine main locals 4 functions 3",
         ".func set_rgb index 0",
         "LSTORE 2",
         "LSTORE 1",
         "LSTORE 0",
+        "PUSH 0",
+        "LSTORE 3",
         "EXIT",
         ".end",
-        ".func get_rgb index 1",
+        ".func start_frame index 1",
+        "LSTORE 3",
+        "EXIT",
+        ".end",
+        ".func get_rgb index 2",
         "LLOAD 0",
+        "LLOAD 3",
         "ADD",
         "PUSH 255",
         "MOD",
@@ -589,8 +613,9 @@ fn test_init_get_color2() -> Result<(), MachineError> {
         stack.push(0)?;
         stack.push(0)?;
     }
+    program.start_frame(0, 1u32)?;
     let (r, g, b) = program
-        .get_led_color(0, 31337, 1u32)
+        .get_led_color(0, 31337)
         .expect("Could not get led color");
 
     println!("stack is {:?}", program.stack().as_slice());
@@ -609,8 +634,9 @@ fn test_init_get_color2() -> Result<(), MachineError> {
         stack.push(0)?;
         stack.push(0)?;
     }
+    program.start_frame(0, 30u32)?;
     let (r, g, b) = program
-        .get_led_color(0, 31337, 30u32)
+        .get_led_color(0, 31337)
         .expect("Could not get led color");
 
     println!("stack is {:?}", program.stack().as_slice());

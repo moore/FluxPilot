@@ -72,8 +72,15 @@ For each type `t`:
 Function index convention used by host helpers:
 
 - `0 = init`
-- `1 = get_color`
+- `1 = start_frame`
+- `2 = get_color`
 - remaining are user-defined.
+
+Host render-loop call order is:
+
+1. `init` once when the program is initialized.
+2. `start_frame(tick)` once per machine per frame/timestep.
+3. `get_color(index)` once per machine for each LED in the frame.
 
 Function tables (pointed to by `FUNCTION_TABLE_OFFSET`) are sequences of entry
 points into `static_data`:

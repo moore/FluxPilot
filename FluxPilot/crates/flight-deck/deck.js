@@ -385,7 +385,7 @@ export async function initDeck() {
     globalThis[DECK_KEY] ??= new FlightDeck();
     if (editorEl && !editorEl.value.trim()) {
         editorEl.value = `
-.machine main locals 4 functions 4
+.machine main locals 5 functions 5
 
 .func init index 0
     LOAD_STATIC init_red
@@ -396,22 +396,30 @@ export async function initDeck() {
     LSTORE 2
     LOAD_STATIC init_brightness
     LSTORE 3
+    PUSH 0
+    LSTORE 4
     EXIT
 .end
 
-.func set_rgb index 2
+.func start_frame index 1
+    LSTORE 4
+    EXIT
+.end
+
+.func set_rgb index 3
     LSTORE 2
     LSTORE 1
     LSTORE 0
     EXIT
 .end
 
-.func set_brightness index 3
+.func set_brightness index 4
     LSTORE 3
     EXIT
 .end
 
-.func get_rgb index 1
+.func get_rgb index 2
+    LLOAD 4
     DUP
     PUSH 120
     MOD

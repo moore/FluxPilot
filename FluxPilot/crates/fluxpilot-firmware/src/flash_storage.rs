@@ -7,7 +7,8 @@ const WORD_SIZE_BYTES: usize = 2;
 // Header layout: magic, version, program length (words), program crc32,
 // ui state length (bytes), ui state crc32, sequence, header crc32.
 const HEADER_MAGIC: u32 = u32::from_le_bytes(*b"PLIO");
-const HEADER_VERSION: u32 = 3;
+// Bump on incompatible persisted-program format/runtime contracts.
+const HEADER_VERSION: u32 = 4;
 const HEADER_SIZE_BYTES: usize = 32;
 const HEADER_WORDS: usize = HEADER_SIZE_BYTES / WORD_SIZE_BYTES;
 const SLOT_COUNT: usize = 2;

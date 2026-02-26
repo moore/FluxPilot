@@ -45,12 +45,15 @@ pub async fn led_loop<
                     return;
                 }
             };
+            for machine_number in 0..machine_count {
+                let _ = pliot.start_frame(machine_number, tick);
+            }
             for (i, led) in data.iter_mut().enumerate() {
                 let mut red = 0u8;
                 let mut green = 0u8;
                 let mut blue = 0u8;
                 for machine_number in 0..machine_count {
-                    match pliot.get_led_color(machine_number, i as u16, tick, (red, green, blue)) {
+                    match pliot.get_led_color(machine_number, i as u16, (red, green, blue)) {
                         Ok((next_red, next_green, next_blue)) => {
                             red = next_red;
                             green = next_green;

@@ -177,20 +177,31 @@ assembler should emit a valid header based on `.machine` and `.func` blocks.
 
 This example mirrors the test program used in code:
 
-    .machine main locals 3 functions 2
+    .machine main locals 4 functions 3
 
     .local red 0
     .local green 1
     .local blue 2
+    .local tick 3
 
-    .func set_rgb index 0
-        LSTORE 0
-        LSTORE 1
-        LSTORE 2
+    .func init index 0
+        PUSH 8
+        LSTORE red
+        PUSH 16
+        LSTORE green
+        PUSH 32
+        LSTORE blue
+        PUSH 0
+        LSTORE tick
         EXIT
     .end
 
-    .func get_rgb index 1
+    .func start_frame index 1
+        LSTORE tick
+        EXIT
+    .end
+
+    .func get_rgb index 2
         LLOAD 0
         LLOAD 1
         LLOAD 2
