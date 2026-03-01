@@ -396,7 +396,7 @@ export const SIMPLE_CRAWLER_MACHINE = `
     .local speed 3
     .local brightness 4
     .local led_count 5
-    .local frame_tick 6
+    .local current_index 6
 
     .func init index 0
       LOAD_STATIC init_red
@@ -412,12 +412,18 @@ export const SIMPLE_CRAWLER_MACHINE = `
       LOAD_STATIC init_led_count
       LSTORE led_count
       PUSH 0
-      LSTORE frame_tick
+      LSTORE current_index
       EXIT
     .end
 
     .func start_frame index 1
-      LSTORE frame_tick
+      LLOAD speed ; Ticks per led
+      LLOAD led_count
+      MUL  ; total ticks for a anamation cycle
+      MOD ; count up total ticks and cycle
+      LLOAD speed
+      DIV
+      LSTORE current_index
       EXIT
     .end
 
@@ -448,19 +454,8 @@ export const SIMPLE_CRAWLER_MACHINE = `
       .frame sgreen 1
       .frame sblue 2
       .frame led_index 3
-      .frame ticks 4
-      SLOAD led_index
-      SLOAD ticks
-      LLOAD speed ; Ticks per led
-      LLOAD led_count
-      MUL  ; total ticks for a anamation cycle
-      MOD ; count up total ticks and cycle
-      LLOAD speed
-      DIV
+      LLOAD current_index
       BREQ match
-      SLOAD sred
-      SLOAD sgreen
-      SLOAD sblue
       RET 3
       match: 
       LLOAD red
@@ -482,8 +477,7 @@ export const SIMPLE_CRAWLER_MACHINE = `
     .end
 
     .func get_rgb index 2
-      LLOAD frame_tick
-      PUSH 5
+      PUSH 4
       CALL get_rgb_worker
       EXIT
     .end
@@ -496,12 +490,15 @@ export const SIMPLE_CRAWLER_MACHINE = `
 
 
 export const PULSE_MACHINE = `
-.machine main locals 5 functions 5
+.machine main locals 7 functions 5
     .local red 0
     .local green 1
     .local blue 2
     .local brightness 3
-    .local frame_tick 4
+    .local frame_red 4
+    .local frame_blue 5
+    .local frame_green  6
+
 
     .func init index 0
       LOAD_STATIC init_red
@@ -513,12 +510,50 @@ export const PULSE_MACHINE = `
       PUSH 10
       LSTORE brightness
       PUSH 0
-      LSTORE frame_tick
+      LSTORE frame_red
+      PUSH 0
+      LSTORE frame_blue
+      PUSH 0
+      LSTORE frame_green
       EXIT
     .end
 
     .func start_frame index 1
-      LSTORE frame_tick
+      DUP
+      PUSH 120
+      MOD
+      SWAP
+      PUSH 120
+      DIV
+      PUSH 2
+      MOD
+      PUSH 0
+      BREQ even
+      PUSH 120
+      SWAP
+      SUB
+      even:
+      PUSH 4
+      DIV
+      LLOAD red
+      ADD
+      LLOAD brightness
+      MUL
+      PUSH 100
+      DIV
+      LSTORE frame_red
+      LLOAD green
+      LLOAD brightness
+      MUL
+      PUSH 100
+      DIV
+      LSTORE frame_green
+      LLOAD blue
+      LLOAD brightness
+      MUL
+      PUSH 100
+      DIV
+      LSTORE frame_blue
       EXIT
     .end
 
@@ -539,40 +574,9 @@ export const PULSE_MACHINE = `
       .frame sgreen 1
       .frame sblue 2
       .frame led_index 3
-      SLOAD led_index
-      LLOAD frame_tick
-      DUP
-      PUSH 120
-      MOD
-      SWAP
-      PUSH 120
-      DIV
-      PUSH 2
-      MOD
-      PUSH 0
-      BREQ even
-      PUSH 120
-      SWAP
-      SUB
-      even:
-      PUSH 4
-      DIV
-      LLOAD 0
-      ADD
-      LLOAD brightness
-      MUL
-      PUSH 100
-      DIV
-      LLOAD 1
-      LLOAD brightness
-      MUL
-      PUSH 100
-      DIV
-      LLOAD 2
-      LLOAD brightness
-      MUL
-      PUSH 100
-      DIV
+      LLOAD frame_red
+      LLOAD frame_green
+      LLOAD frame_blue
       EXIT
     .end
 
