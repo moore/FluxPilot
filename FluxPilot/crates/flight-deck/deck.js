@@ -15,7 +15,7 @@ const DECK_KEY = "__flightDeck__";
 const HANDLERS_BOUND_KEY = "__flightDeckHandlersBound__";
 const UI_STATE_SERIALIZE_KEY = "__serializeUiState";
 const UI_STATE_RESTORE_KEY = "__restoreUiState";
-const GLOBAL_BRIGHTNESS_FUNCTION = 3;
+const GLOBAL_BRIGHTNESS_FUNCTION = 4;
 const CONTROL_STATIC_PREFIX = "init_";
 const CONTROL_STATIC_BLOCK = "control_statics";
 let usbReadActive = false;
@@ -421,33 +421,49 @@ export async function initDeck() {
 .func get_rgb index 2
     LLOAD 4
     DUP
-    PUSH 120
+    PUSH 2000
     MOD
     SWAP
-    PUSH 120
+    PUSH 2000
     DIV
     PUSH 2
     MOD
     PUSH 0
     BREQ even
-    PUSH 120
+    PUSH 2000
     SWAP
     SUB
     even:
-    PUSH 4
+    DUP
+    MUL
+    PUSH 42
+    MUL
+    PUSH 4000
     DIV
-    LLOAD 0
+    PUSH 18000
     ADD
+    DUP
+    LLOAD 0
+    MUL
+    PUSH 60000
+    DIV
     LLOAD 3
     MUL
     PUSH 100
     DIV
+    DUP
     LLOAD 1
+    MUL
+    PUSH 60000
+    DIV
     LLOAD 3
     MUL
     PUSH 100
     DIV
     LLOAD 2
+    MUL
+    PUSH 60000
+    DIV
     LLOAD 3
     MUL
     PUSH 100

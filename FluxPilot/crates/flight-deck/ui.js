@@ -507,7 +507,7 @@ export const PULSE_MACHINE = `
       LSTORE green
       LOAD_STATIC init_blue
       LSTORE blue
-      PUSH 10
+      PUSH 50
       LSTORE brightness
       PUSH 0
       LSTORE frame_red
@@ -520,35 +520,51 @@ export const PULSE_MACHINE = `
 
     .func start_frame index 1
       DUP
-      PUSH 120
+      PUSH 2000
       MOD
       SWAP
-      PUSH 120
+      PUSH 2000
       DIV
       PUSH 2
       MOD
       PUSH 0
       BREQ even
-      PUSH 120
+      PUSH 2000
       SWAP
       SUB
       even:
-      PUSH 4
+      DUP
+      MUL
+      PUSH 42
+      MUL
+      PUSH 4000
       DIV
-      LLOAD red
+      PUSH 18000
       ADD
+      DUP
+      LLOAD red
+      MUL
+      PUSH 60000
+      DIV
       LLOAD brightness
       MUL
       PUSH 100
       DIV
       LSTORE frame_red
+      DUP
       LLOAD green
+      MUL
+      PUSH 60000
+      DIV
       LLOAD brightness
       MUL
       PUSH 100
       DIV
       LSTORE frame_green
       LLOAD blue
+      MUL
+      PUSH 60000
+      DIV
       LLOAD brightness
       MUL
       PUSH 100
